@@ -85,18 +85,23 @@ local State = {
     Running = true,
     UiScale = 1.0,
     
-    -- Auto Build Toggles
-    BuildCircuit = false,
-    BuildOval = false,
-    BuildSpiral = false,
-    BuildRunway = false,
-    BuildPlatform = false,
-    BuildMegaPlatform = false,
-    BuildSkyPillar = false,
-    AutoRailPath = false,
-    AutoClearBlocks = false,
+    -- Master Automation
+    MasterCoasterFarm = false,     -- Builds Hill + Stunt Loops, Spawns Cart, Auto Rides & Farms Infinite Cash
     
-    -- Stunt Loops Toggles
+    -- Coaster Builders (Toggles)
+    BuildStuntTrack = false,       -- Exact Hill + Double Loop from picture
+    BuildCircuit = false,          -- Full loop oval circuit
+    BuildSpiral = false,           -- Sky spiral coaster
+    BuildRunway = false,           -- High-speed boost runway
+    AutoRailPath = false,          -- Live path follower while walking/flying
+    
+    -- Structure Builders (Toggles)
+    BuildPlatform = false,         -- 10x10 Platform
+    BuildMegaPlatform = false,     -- 20x20 Platform
+    BuildSkyPillar = false,        -- Pillar straight to sky
+    AutoClearBlocks = false,       -- Demolish all placed blocks
+    
+    -- Stunt Stunners (Toggles)
     LoopRail = false,
     MonsterLoop = false,
     MegaDrop = false,
@@ -107,17 +112,17 @@ local State = {
     AirtimeHills = false,
     DoubleLoop = false,
     
-    -- Cart & Ride Toggles
+    -- Cart & Ride Automation
     AutoSpawnCart = false,
     AutoRideCart = false,
     BoostCartSpeed = false,
     CartSpeedMultiplier = 2,
     
-    -- Automation & Rewards
-    AutoClaimRewards = false,
-    AutoClaimDaily = false,
+    -- Economy & Rewards
+    AutoClaimRewards = false,      -- Time rewards gift box (12 tiers)
+    AutoClaimDaily = false,        -- Daily login cash
     
-    -- Movement & Utility
+    -- Player Movement
     SpeedHack = false,
     WalkSpeed = 32,
     JumpHack = false,
@@ -139,20 +144,20 @@ local State = {
 -- MONOCHROME THEME (PURE BLACK & CRISP WHITE)
 -- ========================================================================
 local Theme = {
-    BG        = Color3.fromRGB(12, 12, 12),
-    Header    = Color3.fromRGB(18, 18, 18),
-    ItemBg    = Color3.fromRGB(22, 22, 22),
-    ItemHover = Color3.fromRGB(30, 30, 30),
-    Border    = Color3.fromRGB(44, 44, 44),
+    BG          = Color3.fromRGB(12, 12, 12),
+    Header      = Color3.fromRGB(18, 18, 18),
+    ItemBg      = Color3.fromRGB(22, 22, 22),
+    ItemHover   = Color3.fromRGB(30, 30, 30),
+    Border      = Color3.fromRGB(44, 44, 44),
     BorderLight = Color3.fromRGB(70, 70, 70),
-    White     = Color3.fromRGB(255, 255, 255),
-    Muted     = Color3.fromRGB(160, 160, 160),
-    DarkMuted = Color3.fromRGB(100, 100, 100),
-    ToggleOFF = Color3.fromRGB(28, 28, 28),
-    ToggleON  = Color3.fromRGB(255, 255, 255),
-    Red       = Color3.fromRGB(230, 60, 60),
-    FontB     = Enum.Font.GothamBold,
-    FontR     = Enum.Font.GothamMedium,
+    White       = Color3.fromRGB(255, 255, 255),
+    Muted       = Color3.fromRGB(160, 160, 160),
+    DarkMuted   = Color3.fromRGB(100, 100, 100),
+    ToggleOFF   = Color3.fromRGB(28, 28, 28),
+    ToggleON    = Color3.fromRGB(255, 255, 255),
+    Red         = Color3.fromRGB(230, 60, 60),
+    FontB       = Enum.Font.GothamBold,
+    FontR       = Enum.Font.GothamMedium,
 }
 
 -- ========================================================================
@@ -203,44 +208,223 @@ local function equipTool(toolName)
     return char:FindFirstChildOfClass("Tool")
 end
 
--- Universal Block Placement Dispatcher (Robust multi-signature)
+-- Universal Block Placement Dispatcher
 local function placeVoxelBlock(cell, blockName, rot)
     rot = rot or 0
     if not PlaceBlockRemote then return false end
     
-    -- Equip tool if available
     local tool = equipTool(blockName)
     
-    -- Safe multi-signature fire
-    pcall(function()
-        PlaceBlockRemote:FireServer(cell, rot)
-    end)
-    pcall(function()
-        PlaceBlockRemote:FireServer(cell, blockName, rot)
-    end)
-    pcall(function()
-        PlaceBlockRemote:FireServer(cell, rot, blockName)
-    end)
-    pcall(function()
-        PlaceBlockRemote:FireServer(cell, rot, Vector3.new(0, 0, 1))
-    end)
+    pcall(function() PlaceBlockRemote:FireServer(cell, rot) end)
+    pcall(function() PlaceBlockRemote:FireServer(cell, blockName, rot) end)
+    pcall(function() PlaceBlockRemote:FireServer(cell, rot, blockName) end)
+    pcall(function() PlaceBlockRemote:FireServer(cell, rot, Vector3.new(0, 0, 1)) end)
     
     if tool and tool:FindFirstChild("Handle") then
         pcall(function() tool:Activate() end)
     end
-    
     return true
 end
 
+-- Stunt Placement Dispatcher
+local function placeStunt(cell, kind, r, dir)
+    if not PlaceLoopRemote then return false end
+    r = r or 6
+    dir = dir or Vector3.new(0, 0, 1)
+    pcall(function()
+        PlaceLoopRemote:FireServer(cell, kind, 0, r, dir)
+    end)
+    pcall(function()
+        if PlaceTemplateRemote then
+            PlaceTemplateRemote:FireServer(kind, cell, 0)
+        end
+    end)
+    return true
+end
+
+-- Spawn & Mount Cart
+local function spawnCart(cell)
+    if not PlaceCartRemote then return end
+    equipTool("Minecart")
+    pcall(function()
+        PlaceCartRemote:FireServer(cell)
+    end)
+end
+
+local function mountNearestCart()
+    local root = getRootPart()
+    if not root then return end
+    local nearest = nil
+    local minDist = 50
+    local cartsFolder = Workspace:FindFirstChild("Minecarts") or Workspace
+    for _, item in ipairs(cartsFolder:GetDescendants()) do
+        if item:IsA("VehicleSeat") or (item:IsA("Seat") and item.Name:lower():find("cart")) then
+            local d = (item.Position - root.Position).Magnitude
+            if d < minDist and not item.Occupant then
+                minDist = d
+                nearest = item
+            end
+        end
+    end
+    if nearest then
+        local hum = getHumanoid()
+        if hum then nearest:Sit(hum) end
+    end
+end
+
 -- ========================================================================
--- CORE AUTO BUILD RUNNERS (TOGGLE DRIVEN)
+-- MASTER COASTER FARM ENGINE (HILL + DOUBLE LOOP + INFINITE CASH RIDE)
 -- ========================================================================
 
--- 1. Closed Coaster Loop
+-- Function: Construct the exact Stunt Coaster from user's screenshot
+local function buildStuntHillAndLoops()
+    local root = getRootPart()
+    if not root then return end
+    
+    local startCell = worldToCell(root.Position)
+    local curY = math.max(1, startCell.Y)
+    local lookDir = root.CFrame.LookVector
+    local dirX = math.abs(lookDir.X) > math.abs(lookDir.Z) and (lookDir.X > 0 and 1 or -1) or 0
+    local dirZ = dirX == 0 and (lookDir.Z > 0 and 1 or -1) or 0
+    
+    -- 1. Start Launch Platform & Powered Rails
+    for i = 1, 4 do
+        local c = Vector3.new(startCell.X + (dirX * i), curY, startCell.Z + (dirZ * i))
+        placeVoxelBlock(Vector3.new(c.X, c.Y - 1, c.Z), "Oak Wood Plank", 0)
+        placeVoxelBlock(c, "Powered Rail - Active", 0)
+        task.wait(State.BuildSpeed)
+    end
+    
+    -- 2. Ascending Hill Ramp with Chainlift Rails (Going Up 4 Blocks)
+    local hillStart = 5
+    for h = 1, 4 do
+        local c = Vector3.new(startCell.X + (dirX * (hillStart + h)), curY + h, startCell.Z + (dirZ * (hillStart + h)))
+        -- Support Pillars
+        for sy = 0, h do
+            placeVoxelBlock(Vector3.new(c.X, curY - 1 + sy, c.Z), "Oak Wood Plank", 0)
+        end
+        placeVoxelBlock(c, "Chainlift Rail", 0)
+        task.wait(State.BuildSpeed)
+    end
+    
+    -- 3. Hill Peak & Steep Drop (Going Back Down)
+    local dropStart = hillStart + 4
+    for h = 1, 4 do
+        local c = Vector3.new(startCell.X + (dirX * (dropStart + h)), curY + (4 - h), startCell.Z + (dirZ * (dropStart + h)))
+        for sy = 0, (4 - h) do
+            placeVoxelBlock(Vector3.new(c.X, curY - 1 + sy, c.Z), "Oak Wood Plank", 0)
+        end
+        placeVoxelBlock(c, "Powered Rail - Active", 0)
+        task.wait(State.BuildSpeed)
+    end
+    
+    -- 4. Transition Flat Track
+    local loopStart = dropStart + 5
+    for i = 0, 2 do
+        local c = Vector3.new(startCell.X + (dirX * (loopStart + i)), curY, startCell.Z + (dirZ * (loopStart + i)))
+        placeVoxelBlock(Vector3.new(c.X, c.Y - 1, c.Z), "Stone Bricks", 0)
+        placeVoxelBlock(c, "Powered Rail - Active", 0)
+        task.wait(State.BuildSpeed)
+    end
+    
+    -- 5. Stunt Element 1: Vertical Loop (Radius 6)
+    local loop1Cell = Vector3.new(startCell.X + (dirX * (loopStart + 3)), curY, startCell.Z + (dirZ * (loopStart + 3)))
+    placeStunt(loop1Cell, "loop", 6, Vector3.new(dirX, 0, dirZ))
+    task.wait(0.2)
+    
+    -- 6. Stunt Element 2: Second Loop (Radius 6 or 16)
+    local loop2Cell = Vector3.new(startCell.X + (dirX * (loopStart + 7)), curY, startCell.Z + (dirZ * (loopStart + 7)))
+    placeStunt(loop2Cell, "loop", 6, Vector3.new(dirX, 0, dirZ))
+    task.wait(0.2)
+    
+    -- 7. Return Loop (Connects back so cart loops continuously forever)
+    local returnStart = loopStart + 11
+    local width = 8
+    local sideX = -dirZ
+    local sideZ = dirX
+    
+    -- Far Curve
+    for w = 0, width do
+        local c = Vector3.new(startCell.X + (dirX * returnStart) + (sideX * w), curY, startCell.Z + (dirZ * returnStart) + (sideZ * w))
+        placeVoxelBlock(Vector3.new(c.X, c.Y - 1, c.Z), "Oak Wood Plank", 0)
+        placeVoxelBlock(c, "Powered Rail - Active", 0)
+        task.wait(State.BuildSpeed)
+    end
+    
+    -- Return Straight Run
+    for i = returnStart, 1, -1 do
+        local c = Vector3.new(startCell.X + (dirX * i) + (sideX * width), curY, startCell.Z + (dirZ * i) + (sideZ * width))
+        placeVoxelBlock(Vector3.new(c.X, c.Y - 1, c.Z), "Oak Wood Plank", 0)
+        placeVoxelBlock(c, (i % 3 == 0) and "Powered Rail - Active" or "Rail", 0)
+        task.wait(State.BuildSpeed)
+    end
+    
+    -- Near Curve back to start
+    for w = width, 0, -1 do
+        local c = Vector3.new(startCell.X + (sideX * w), curY, startCell.Z + (sideZ * w))
+        placeVoxelBlock(Vector3.new(c.X, c.Y - 1, c.Z), "Oak Wood Plank", 0)
+        placeVoxelBlock(c, "Powered Rail - Active", 0)
+        task.wait(State.BuildSpeed)
+    end
+    
+    return Vector3.new(startCell.X + (dirX * 2), curY, startCell.Z + (dirZ * 2))
+end
+
+-- Master Coaster Farm Loop (Build + Ride + Infinite Cash)
+task.spawn(function()
+    while State.Running do
+        if State.MasterCoasterFarm then
+            State.Status = "Building Stunt Hill & Loops..."
+            local spawnPosCell = buildStuntHillAndLoops()
+            task.wait(0.5)
+            
+            State.Status = "Spawning Minecart on Stunt Track..."
+            if spawnPosCell then
+                spawnCart(spawnPosCell)
+            else
+                local root = getRootPart()
+                if root then spawnCart(worldToCell(root.Position)) end
+            end
+            task.wait(0.8)
+            
+            State.Status = "Mounting Cart & Boosting Speed..."
+            mountNearestCart()
+            State.BoostCartSpeed = true
+            State.AutoClaimRewards = true
+            State.AutoClaimDaily = true
+            
+            -- Keep riding and farming money while Master toggle is ON
+            while State.MasterCoasterFarm and State.Running do
+                local hum = getHumanoid()
+                if hum and not hum.SeatPart then
+                    mountNearestCart()
+                end
+                State.Status = "Farming Thrill Cash & Stunt Loops!"
+                task.wait(2)
+            end
+        end
+        task.wait(0.5)
+    end
+end)
+
+-- Dedicated Stunt Coaster Builder (Hill + Loops)
+task.spawn(function()
+    while State.Running do
+        if State.BuildStuntTrack then
+            State.Status = "Constructing Hill & Double Loop..."
+            buildStuntHillAndLoops()
+            State.Status = "Stunt Coaster Ready!"
+            State.BuildStuntTrack = false
+        end
+        task.wait(0.3)
+    end
+end)
+
+-- Closed Coaster Loop
 task.spawn(function()
     while State.Running do
         if State.BuildCircuit then
-            State.Status = "Building Coaster Loop..."
+            State.Status = "Building Coaster Circuit..."
             local root = getRootPart()
             if root then
                 local centerCell = worldToCell(root.Position)
@@ -257,7 +441,6 @@ task.spawn(function()
                     table.insert(trackCells, {cell = Vector3.new(centerCell.X - rX, y, centerCell.Z + z), rot = 3, isPower = (math.abs(z) % 3 == 0)})
                 end
                 
-                -- Place support foundation under track
                 for _, pt in ipairs(trackCells) do
                     if not State.BuildCircuit then break end
                     local baseCell = Vector3.new(pt.cell.X, pt.cell.Y - 1, pt.cell.Z)
@@ -265,7 +448,6 @@ task.spawn(function()
                     if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
                 end
                 
-                -- Place rails
                 for _, pt in ipairs(trackCells) do
                     if not State.BuildCircuit then break end
                     local rail = pt.isPower and "Powered Rail - Active" or "Rail"
@@ -274,55 +456,13 @@ task.spawn(function()
                 end
             end
             State.BuildCircuit = false
-            State.Status = "Coaster Loop Complete!"
+            State.Status = "Coaster Circuit Built!"
         end
         task.wait(0.3)
     end
 end)
 
--- 2. Large Oval Circuit
-task.spawn(function()
-    while State.Running do
-        if State.BuildOval then
-            State.Status = "Building Oval Circuit..."
-            local root = getRootPart()
-            if root then
-                local centerCell = worldToCell(root.Position)
-                local rX, rZ = 14, 8
-                local y = math.max(1, centerCell.Y + 1)
-                
-                local trackCells = {}
-                for x = -rX, rX do
-                    table.insert(trackCells, {cell = Vector3.new(centerCell.X + x, y, centerCell.Z - rZ), rot = 0, isPower = (math.abs(x) % 3 == 0)})
-                    table.insert(trackCells, {cell = Vector3.new(centerCell.X + x, y, centerCell.Z + rZ), rot = 2, isPower = (math.abs(x) % 3 == 0)})
-                end
-                for z = -rZ + 1, rZ - 1 do
-                    table.insert(trackCells, {cell = Vector3.new(centerCell.X + rX, y, centerCell.Z + z), rot = 1, isPower = (math.abs(z) % 3 == 0)})
-                    table.insert(trackCells, {cell = Vector3.new(centerCell.X - rX, y, centerCell.Z + z), rot = 3, isPower = (math.abs(z) % 3 == 0)})
-                end
-                
-                for _, pt in ipairs(trackCells) do
-                    if not State.BuildOval then break end
-                    local baseCell = Vector3.new(pt.cell.X, pt.cell.Y - 1, pt.cell.Z)
-                    placeVoxelBlock(baseCell, "Stone Bricks", 0)
-                    if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
-                end
-                
-                for _, pt in ipairs(trackCells) do
-                    if not State.BuildOval then break end
-                    local rail = pt.isPower and "Powered Rail - Active" or "Rail"
-                    placeVoxelBlock(pt.cell, rail, pt.rot)
-                    if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
-                end
-            end
-            State.BuildOval = false
-            State.Status = "Oval Circuit Complete!"
-        end
-        task.wait(0.3)
-    end
-end)
-
--- 3. Sky Spiral Coaster
+-- Sky Spiral Coaster
 task.spawn(function()
     while State.Running do
         if State.BuildSpiral then
@@ -341,15 +481,9 @@ task.spawn(function()
                     local cz = centerCell.Z + math.round(math.sin(angle) * rad)
                     local curY = math.max(1, centerCell.Y + math.floor(i / 2))
                     
-                    local cPos = Vector3.new(cx, curY, cz)
-                    local pillarBase = Vector3.new(cx, curY - 1, cz)
-                    
-                    placeVoxelBlock(pillarBase, "Oak Wood Plank", 0)
+                    placeVoxelBlock(Vector3.new(cx, curY - 1, cz), "Oak Wood Plank", 0)
+                    placeVoxelBlock(Vector3.new(cx, curY, cz), "Chainlift Rail", 0)
                     if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
-                    
-                    placeVoxelBlock(cPos, "Chainlift Rail", 0)
-                    if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
-                    
                     angle = angle + stepAngle
                 end
             end
@@ -360,7 +494,7 @@ task.spawn(function()
     end
 end)
 
--- 4. High-Speed Straight Runway
+-- Straight Speed Runway
 task.spawn(function()
     while State.Running do
         if State.BuildRunway then
@@ -371,106 +505,25 @@ task.spawn(function()
                 local lookDir = root.CFrame.LookVector
                 local dirX = math.abs(lookDir.X) > math.abs(lookDir.Z) and (lookDir.X > 0 and 1 or -1) or 0
                 local dirZ = dirX == 0 and (lookDir.Z > 0 and 1 or -1) or 0
-                local len = 25
                 local curY = math.max(1, startCell.Y)
                 
-                for i = 1, len do
+                for i = 1, 25 do
                     if not State.BuildRunway then break end
-                    local curCell = Vector3.new(startCell.X + (dirX * i), curY, startCell.Z + (dirZ * i))
-                    local underCell = Vector3.new(curCell.X, curCell.Y - 1, curCell.Z)
-                    
-                    placeVoxelBlock(underCell, "Stone Bricks", 0)
-                    if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
-                    
+                    local c = Vector3.new(startCell.X + (dirX * i), curY, startCell.Z + (dirZ * i))
+                    placeVoxelBlock(Vector3.new(c.X, c.Y - 1, c.Z), "Stone Bricks", 0)
                     local rail = (i % 2 == 0) and "Launch Rail" or "Powered Rail - Active"
-                    placeVoxelBlock(curCell, rail, 0)
+                    placeVoxelBlock(c, rail, 0)
                     if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
                 end
             end
             State.BuildRunway = false
-            State.Status = "Runway Complete!"
+            State.Status = "Runway Built!"
         end
         task.wait(0.3)
     end
 end)
 
--- 5. Flat Platform (10x10)
-task.spawn(function()
-    while State.Running do
-        if State.BuildPlatform then
-            State.Status = "Building Platform (10x10)..."
-            local root = getRootPart()
-            if root then
-                local centerCell = worldToCell(root.Position)
-                local half = 5
-                local y = math.max(0, centerCell.Y - 1)
-                
-                for x = -half, half do
-                    for z = -half, half do
-                        if not State.BuildPlatform then break end
-                        local targetCell = Vector3.new(centerCell.X + x, y, centerCell.Z + z)
-                        placeVoxelBlock(targetCell, State.SelectedBlockType, 0)
-                        if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
-                    end
-                end
-            end
-            State.BuildPlatform = false
-            State.Status = "Platform (10x10) Complete!"
-        end
-        task.wait(0.3)
-    end
-end)
-
--- 6. Mega Platform (20x20)
-task.spawn(function()
-    while State.Running do
-        if State.BuildMegaPlatform then
-            State.Status = "Building Platform (20x20)..."
-            local root = getRootPart()
-            if root then
-                local centerCell = worldToCell(root.Position)
-                local half = 10
-                local y = math.max(0, centerCell.Y - 1)
-                
-                for x = -half, half do
-                    for z = -half, half do
-                        if not State.BuildMegaPlatform then break end
-                        local targetCell = Vector3.new(centerCell.X + x, y, centerCell.Z + z)
-                        placeVoxelBlock(targetCell, State.SelectedBlockType, 0)
-                        if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
-                    end
-                end
-            end
-            State.BuildMegaPlatform = false
-            State.Status = "Platform (20x20) Complete!"
-        end
-        task.wait(0.3)
-    end
-end)
-
--- 7. Sky Pillar (Height 25)
-task.spawn(function()
-    while State.Running do
-        if State.BuildSkyPillar then
-            State.Status = "Building Sky Pillar..."
-            local root = getRootPart()
-            if root then
-                local centerCell = worldToCell(root.Position)
-                for y = 0, 25 do
-                    if not State.BuildSkyPillar then break end
-                    local targetCell = Vector3.new(centerCell.X, centerCell.Y + y, centerCell.Z)
-                    placeVoxelBlock(targetCell, State.SelectedBlockType, 0)
-                    if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
-                end
-            end
-            State.BuildSkyPillar = false
-            State.Status = "Sky Pillar Complete!"
-        end
-        task.wait(0.3)
-    end
-end)
-
--- 8. Live Rail Path Follower (Lays rails as you move)
+-- Live Rail Path Follower
 task.spawn(function()
     while State.Running do
         if State.AutoRailPath then
@@ -488,9 +541,57 @@ task.spawn(function()
     end
 end)
 
--- 9. Auto Demolish / Clear Blocks
+-- Platform & Tower Builders
 task.spawn(function()
     while State.Running do
+        if State.BuildPlatform then
+            State.Status = "Building Platform (10x10)..."
+            local root = getRootPart()
+            if root then
+                local center = worldToCell(root.Position)
+                local y = math.max(0, center.Y - 1)
+                for x = -5, 5 do
+                    for z = -5, 5 do
+                        if not State.BuildPlatform then break end
+                        placeVoxelBlock(Vector3.new(center.X + x, y, center.Z + z), State.SelectedBlockType, 0)
+                        if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
+                    end
+                end
+            end
+            State.BuildPlatform = false
+            State.Status = "Platform (10x10) Built!"
+        end
+        if State.BuildMegaPlatform then
+            State.Status = "Building Platform (20x20)..."
+            local root = getRootPart()
+            if root then
+                local center = worldToCell(root.Position)
+                local y = math.max(0, center.Y - 1)
+                for x = -10, 10 do
+                    for z = -10, 10 do
+                        if not State.BuildMegaPlatform then break end
+                        placeVoxelBlock(Vector3.new(center.X + x, y, center.Z + z), State.SelectedBlockType, 0)
+                        if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
+                    end
+                end
+            end
+            State.BuildMegaPlatform = false
+            State.Status = "Platform (20x20) Built!"
+        end
+        if State.BuildSkyPillar then
+            State.Status = "Building Sky Pillar..."
+            local root = getRootPart()
+            if root then
+                local center = worldToCell(root.Position)
+                for y = 0, 25 do
+                    if not State.BuildSkyPillar then break end
+                    placeVoxelBlock(Vector3.new(center.X, center.Y + y, center.Z), State.SelectedBlockType, 0)
+                    if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
+                end
+            end
+            State.BuildSkyPillar = false
+            State.Status = "Sky Pillar Built!"
+        end
         if State.AutoClearBlocks then
             if ClearAllRemote then
                 pcall(function() ClearAllRemote:FireServer() end)
@@ -498,11 +599,11 @@ task.spawn(function()
             end
             State.AutoClearBlocks = false
         end
-        task.wait(0.5)
+        task.wait(0.3)
     end
 end)
 
--- 10. Stunt Loops & Presets Runners
+-- Stunt Loops Presets
 local function runStuntPreset(kind, r)
     local root = getRootPart()
     if root and PlaceLoopRemote then
@@ -529,44 +630,17 @@ task.spawn(function()
     end
 end)
 
--- ========================================================================
--- MINECART & REWARDS AUTOMATION
--- ========================================================================
+-- Minecart & Rewards Loop
 task.spawn(function()
     while State.Running do
-        if State.AutoSpawnCart and PlaceCartRemote then
+        if State.AutoSpawnCart then
             local root = getRootPart()
-            if root then
-                equipTool("Minecart")
-                local myCell = worldToCell(root.Position)
-                pcall(function() PlaceCartRemote:FireServer(myCell) end)
-                State.Status = "Spawned Cart"
-            end
+            if root then spawnCart(worldToCell(root.Position)) end
             State.AutoSpawnCart = false
         end
-        
         if State.AutoRideCart then
-            local root = getRootPart()
-            if root then
-                local nearest = nil
-                local minDist = 40
-                local cartsFolder = Workspace:FindFirstChild("Minecarts") or Workspace
-                for _, item in ipairs(cartsFolder:GetDescendants()) do
-                    if item:IsA("VehicleSeat") or (item:IsA("Seat") and item.Name:lower():find("cart")) then
-                        local d = (item.Position - root.Position).Magnitude
-                        if d < minDist and not item.Occupant then
-                            minDist = d
-                            nearest = item
-                        end
-                    end
-                end
-                if nearest then
-                    local hum = getHumanoid()
-                    if hum then nearest:Sit(hum); State.Status = "Mounted Cart" end
-                end
-            end
+            mountNearestCart()
         end
-        
         if State.BoostCartSpeed then
             local hum = getHumanoid()
             if hum and hum.SeatPart and hum.SeatPart:IsA("VehicleSeat") then
@@ -579,7 +653,6 @@ task.spawn(function()
                 end
             end
         end
-        
         if State.AutoClaimDaily and DailyRemotes then
             local cd = DailyRemotes:FindFirstChild("ClaimDaily")
             if cd then pcall(function() cd:FireServer() end) end
@@ -590,7 +663,6 @@ task.spawn(function()
                 for i = 1, 12 do pcall(function() cr:FireServer(i) end) end
             end
         end
-        
         task.wait(1.5)
     end
 end)
@@ -627,7 +699,7 @@ RunService.Stepped:Connect(function()
     end
 end)
 
--- Fly System
+-- Smooth Fly System
 local flyBV, flyBG
 local function toggleFly(enable)
     local root = getRootPart()
@@ -970,7 +1042,6 @@ end)
 -- ========================================================================
 local CategoryPages = {}
 local CategoryButtons = {}
-local activeCategory = "TRACKS"
 
 local function AddCategory(name)
     local btn = Instance.new("TextButton", CatBar)
@@ -1007,7 +1078,6 @@ local function AddCategory(name)
             item.btn.TextColor3 = isAct and Theme.White or Theme.DarkMuted
             item.stroke.Color = isAct and Theme.White or Theme.Border
         end
-        activeCategory = name
     end)
     
     return container
@@ -1043,7 +1113,7 @@ local function AddSection(parent, title)
     ln.BorderSizePixel = 0
 end
 
--- Helper: Pure ON/OFF Toggle Card (No Execute Button!)
+-- Helper: Pure ON/OFF Toggle Card
 local function AddToggle(parent, title, desc, defaultVal, callback)
     local state = defaultVal or false
     local row = Instance.new("Frame", parent)
@@ -1188,17 +1258,18 @@ end
 -- ========================================================================
 
 -- TAB 1: TRACKS
-AddSection(PageTracks, "Continuous Rail Builders")
-AddToggle(PageTracks, "Auto Rail Walk/Fly Follower", "Lays rails directly in front as you move", State.AutoRailPath, function(v)
-    State.AutoRailPath = v
+AddSection(PageTracks, "Master Automation")
+AddToggle(PageTracks, "Auto Coaster Farm (All-in-One)", "Builds Hill+Loops, rides cart & farms cash", State.MasterCoasterFarm, function(v)
+    State.MasterCoasterFarm = v
+end)
+
+AddSection(PageTracks, "Stunt Coaster Builders")
+AddToggle(PageTracks, "Auto Build Stunt Coaster", "Builds Hill Ramp, Drop and Double Loop", State.BuildStuntTrack, function(v)
+    State.BuildStuntTrack = v
 end)
 
 AddToggle(PageTracks, "Auto Build Coaster Loop", "Constructs a full closed loop circuit", State.BuildCircuit, function(v)
     State.BuildCircuit = v
-end)
-
-AddToggle(PageTracks, "Auto Build Large Oval Track", "Extended high-speed oval circuit", State.BuildOval, function(v)
-    State.BuildOval = v
 end)
 
 AddToggle(PageTracks, "Auto Build Sky Spiral Tower", "8-point spiraling coaster with chainlift", State.BuildSpiral, function(v)
@@ -1207,6 +1278,10 @@ end)
 
 AddToggle(PageTracks, "Auto Build Speed Runway", "Straight boosted launch track", State.BuildRunway, function(v)
     State.BuildRunway = v
+end)
+
+AddToggle(PageTracks, "Auto Rail Walk/Fly Follower", "Lays rails directly in front as you move", State.AutoRailPath, function(v)
+    State.AutoRailPath = v
 end)
 
 AddSection(PageTracks, "Build Settings")
@@ -1233,7 +1308,9 @@ AddToggle(PageStructures, "Clear All Placed Blocks", "Demolishes all user-placed
 end)
 
 -- TAB 3: LOOPS (STUNT TRACK PRESETS)
-AddSection(PageStunts, "Instant Stunt Tracks")
+AddSection(PageStunts, "Instant Stunt Elements")
+AddToggle(PageStunts, "Place Double Loop", "Twin continuous vertical loops (as in pic)", State.DoubleLoop, function(v) State.DoubleLoop = v end)
+AddToggle(PageStunts, "Place Airtime Hills", "Triple camelback hill ramps", State.AirtimeHills, function(v) State.AirtimeHills = v end)
 AddToggle(PageStunts, "Place Loop Rail", "Vertical loop at front cell", State.LoopRail, function(v) State.LoopRail = v end)
 AddToggle(PageStunts, "Place Monster Loop", "Gigantic 16-stud radius stunt loop", State.MonsterLoop, function(v) State.MonsterLoop = v end)
 AddToggle(PageStunts, "Place Mega Drop", "Steep high vertical drop track", State.MegaDrop, function(v) State.MegaDrop = v end)
@@ -1241,19 +1318,17 @@ AddToggle(PageStunts, "Place Corkscrew", "360-degree corkscrew roll element", St
 AddToggle(PageStunts, "Place Giant Drop", "Huge thrill tower drop track", State.GiantDrop, function(v) State.GiantDrop = v end)
 AddToggle(PageStunts, "Place Cobra Roll", "Double inversion cobra roll stunt", State.CobraRoll, function(v) State.CobraRoll = v end)
 AddToggle(PageStunts, "Place Zero-G Roll", "Weightless zero gravity roll", State.ZeroGRoll, function(v) State.ZeroGRoll = v end)
-AddToggle(PageStunts, "Place Airtime Hills", "Triple airtime camelback hills", State.AirtimeHills, function(v) State.AirtimeHills = v end)
-AddToggle(PageStunts, "Place Double Loop", "Twin continuous vertical loops", State.DoubleLoop, function(v) State.DoubleLoop = v end)
 
 -- TAB 4: PLAYER, CART & AUTOMATION
 AddSection(PagePlayer, "Minecart Automation")
+AddToggle(PagePlayer, "Auto Ride & Farm Thrill Cash", "Mounts cart and drives infinite loops", State.AutoRideCart, function(v) State.AutoRideCart = v end)
 AddToggle(PagePlayer, "Auto Spawn Minecart", "Places new cart on the nearest rail", State.AutoSpawnCart, function(v) State.AutoSpawnCart = v end)
-AddToggle(PagePlayer, "Auto Mount / Ride Cart", "Continuously sits in nearest cart seat", State.AutoRideCart, function(v) State.AutoRideCart = v end)
 AddToggle(PagePlayer, "Cart Velocity Booster", "Enforces maximum speed and forward torque", State.BoostCartSpeed, function(v) State.BoostCartSpeed = v end)
 AddSlider(PagePlayer, "Cart Speed Multiplier", 1, 5, 2, function(v) State.CartSpeedMultiplier = v end)
 
 AddSection(PagePlayer, "Automated Rewards")
+AddToggle(PagePlayer, "Auto Claim Time Gifts ($130k+)", "Redeems all 12 playtime gifts automatically", State.AutoClaimRewards, function(v) State.AutoClaimRewards = v end)
 AddToggle(PagePlayer, "Auto Claim Daily Login", "Redeems daily rewards every 15s", State.AutoClaimDaily, function(v) State.AutoClaimDaily = v end)
-AddToggle(PagePlayer, "Auto Claim Playtime Cash", "Collects free gift box money automatically", State.AutoClaimRewards, function(v) State.AutoClaimRewards = v end)
 
 AddSection(PagePlayer, "Movement & Hacks")
 AddToggle(PagePlayer, "Speed Hack", "Overrides humanoid walk speed", State.SpeedHack, function(v) State.SpeedHack = v end)
