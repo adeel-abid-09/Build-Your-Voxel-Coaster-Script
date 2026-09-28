@@ -1,19 +1,12 @@
 --[[
     ========================================================================
-    VOXEL COASTER | ADVANCED AUTO BUILDER & AUTOMATION ENGINE
+    VOXEL COASTER | AUTO BUILDER & AUTOMATION ENGINE
     ========================================================================
     Game: Build Your Voxel Coaster
-    Optimized for: Delta, Fluxus, Arceus X, Codex, Solara, Wave, Synapse, PC
+    Optimized for: Delta, Fluxus, Arceus X, Codex, Solara, Wave, PC
     Theme: Pure Midnight Black & Clean Crisp White (Monochrome Pro UI)
-    
-    CORE FEATURES:
-    1. Auto Build Coasters: Closed Circuit Loop, Sky Spiral, Mega Drop, Runway
-    2. Live Rail Follow: Automatically lays rails in front of you as you walk/fly
-    3. Auto Build Structures: Flat Platforms (10x10 to 50x50), Towers, Pillars
-    4. Preset Spawner: Loop Rail, Monster Loop, Giant Drop, Corkscrew, Airtime Hills
-    5. Auto Cart Manager: Spawn Cart, Auto Mount/Ride, Cart Speed Boost
-    6. Auto Rewards: Daily Claim, Free Cash, Playtime Rewards
-    7. Movement: Smooth Fly, Noclip, WalkSpeed, Infinite Jump, 24/7 Anti-AFK
+    Layout: Portrait with Dynamic Scale, Minimize and Corner Resize Grip
+    Strict Rule: Zero Emojis, No Hub Branding, 100% Toggle-Driven Automation
     ========================================================================
 --]]
 
@@ -85,55 +78,36 @@ local PlaceLoopRemote = BuildRemotes and BuildRemotes:FindFirstChild("PlaceLoop"
 local PlaceTemplateRemote = BuildRemotes and BuildRemotes:FindFirstChild("PlaceTemplate")
 local ClearAllRemote = BuildRemotes and BuildRemotes:FindFirstChild("ClearAll")
 
--- Available Blocks List
-local AvailableBlocks = {
-    "Oak Wood Plank",
-    "Rail",
-    "Powered Rail - Active",
-    "Chainlift Rail",
-    "Launch Rail",
-    "Cobblestone",
-    "Stone Bricks",
-    "Glass",
-    "Block of Diamond",
-    "Block of Gold",
-    "Block of Iron",
-    "Obsidian",
-    "White Wool",
-    "Black Wool",
-    "Red Wool",
-    "TNT"
-}
-
-if BlocksFolder then
-    local collected = {}
-    for _, b in ipairs(BlocksFolder:GetChildren()) do
-        if b:IsA("BasePart") or b:IsA("Model") then
-            table.insert(collected, b.Name)
-        end
-    end
-    if #collected > 0 then
-        table.sort(collected)
-        AvailableBlocks = collected
-    end
-end
-
 -- ========================================================================
 -- RUNTIME STATE
 -- ========================================================================
 local State = {
     Running = true,
+    UiScale = 1.0,
     
-    -- Auto Build
+    -- Auto Build Toggles
+    BuildCircuit = false,
+    BuildOval = false,
+    BuildSpiral = false,
+    BuildRunway = false,
+    BuildPlatform = false,
+    BuildMegaPlatform = false,
+    BuildSkyPillar = false,
     AutoRailPath = false,
-    SelectedRailType = "Rail",
-    SelectedBlockType = "Oak Wood Plank",
-    BuildSpeed = 0.05, -- Delay between blocks
-    PlatformSize = 10,
-    TowerHeight = 20,
-    IsBuilding = false,
+    AutoClearBlocks = false,
     
-    -- Cart & Ride
+    -- Stunt Loops Toggles
+    LoopRail = false,
+    MonsterLoop = false,
+    MegaDrop = false,
+    Corkscrew = false,
+    GiantDrop = false,
+    CobraRoll = false,
+    ZeroGRoll = false,
+    AirtimeHills = false,
+    DoubleLoop = false,
+    
+    -- Cart & Ride Toggles
     AutoSpawnCart = false,
     AutoRideCart = false,
     BoostCartSpeed = false,
@@ -154,29 +128,35 @@ local State = {
     FlySpeed = 50,
     AntiAFK = true,
     
-    -- Status
+    -- Settings
+    BuildSpeed = 0.05,
+    SelectedBlockType = "Oak Wood Plank",
+    SelectedRailType = "Rail",
     Status = "Ready"
 }
 
 -- ========================================================================
--- MONOCHROME BLACK & WHITE THEME
+-- MONOCHROME THEME (PURE BLACK & CRISP WHITE)
 -- ========================================================================
 local Theme = {
-    BgDark     = Color3.fromRGB(12, 12, 12),      -- Main Window Background
-    BgCard     = Color3.fromRGB(20, 20, 20),      -- Component Container Background
-    BgInput    = Color3.fromRGB(28, 28, 28),      -- Buttons / Fields Background
-    BgHover    = Color3.fromRGB(38, 38, 38),      -- Button Hover
-    Border     = Color3.fromRGB(48, 48, 48),      -- Outlines & Dividers
-    BorderLight= Color3.fromRGB(75, 75, 75),      -- Highlight Outlines
-    White      = Color3.fromRGB(255, 255, 255),  -- Active Text & Highlights
-    Muted      = Color3.fromRGB(170, 170, 170),  -- Subtitles & Labels
-    DarkMuted  = Color3.fromRGB(110, 110, 110),  -- Inactive Text
-    Accent     = Color3.fromRGB(255, 255, 255),  -- Monochrome Accent (White)
-    AccentDark = Color3.fromRGB(14, 14, 14)       -- Text on Accent
+    BG        = Color3.fromRGB(12, 12, 12),
+    Header    = Color3.fromRGB(18, 18, 18),
+    ItemBg    = Color3.fromRGB(22, 22, 22),
+    ItemHover = Color3.fromRGB(30, 30, 30),
+    Border    = Color3.fromRGB(44, 44, 44),
+    BorderLight = Color3.fromRGB(70, 70, 70),
+    White     = Color3.fromRGB(255, 255, 255),
+    Muted     = Color3.fromRGB(160, 160, 160),
+    DarkMuted = Color3.fromRGB(100, 100, 100),
+    ToggleOFF = Color3.fromRGB(28, 28, 28),
+    ToggleON  = Color3.fromRGB(255, 255, 255),
+    Red       = Color3.fromRGB(230, 60, 60),
+    FontB     = Enum.Font.GothamBold,
+    FontR     = Enum.Font.GothamMedium,
 }
 
 -- ========================================================================
--- UTILITY FUNCTIONS
+-- UTILITY & TOOL HELPERS
 -- ========================================================================
 local function getCharacter()
     return LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
@@ -201,365 +181,421 @@ local function worldToCell(pos)
     )
 end
 
--- Convert Grid Cell to World Position
-local function cellToWorld(cell, isRail)
-    local yOffset = isRail and 0.1 or 2
-    return Vector3.new(
-        cell.X * 4 + 2,
-        cell.Y * 4 + yOffset,
-        cell.Z * 4 + 2
-    )
-end
-
--- Safe Tool Equipper
+-- Proper Tool Equipper with Humanoid Support
 local function equipTool(toolName)
     local char = getCharacter()
     if not char then return nil end
-    local equipped = char:FindFirstChild(toolName)
-    if equipped then return equipped end
+    local hum = getHumanoid()
+    
+    local tool = char:FindFirstChild(toolName)
+    if tool and tool:IsA("Tool") then return tool end
     
     local inBackpack = LocalPlayer.Backpack:FindFirstChild(toolName)
     if inBackpack then
-        inBackpack.Parent = char
-        task.wait(0.08)
+        if hum then
+            hum:EquipTool(inBackpack)
+        else
+            inBackpack.Parent = char
+        end
         return inBackpack
     end
-    return nil
+    
+    return char:FindFirstChildOfClass("Tool")
 end
 
--- Universal Block Placement Dispatcher
+-- Universal Block Placement Dispatcher (Robust multi-signature)
 local function placeVoxelBlock(cell, blockName, rot)
     rot = rot or 0
     if not PlaceBlockRemote then return false end
     
-    -- Ensure appropriate tool is equipped if possible
-    equipTool(blockName)
+    -- Equip tool if available
+    local tool = equipTool(blockName)
     
-    -- Fire with safety checks for various server implementations
-    local success = pcall(function()
+    -- Safe multi-signature fire
+    pcall(function()
+        PlaceBlockRemote:FireServer(cell, rot)
+    end)
+    pcall(function()
         PlaceBlockRemote:FireServer(cell, blockName, rot)
     end)
+    pcall(function()
+        PlaceBlockRemote:FireServer(cell, rot, blockName)
+    end)
+    pcall(function()
+        PlaceBlockRemote:FireServer(cell, rot, Vector3.new(0, 0, 1))
+    end)
     
-    if not success then
-        pcall(function()
-            PlaceBlockRemote:FireServer(cell, rot, blockName)
-        end)
+    if tool and tool:FindFirstChild("Handle") then
+        pcall(function() tool:Activate() end)
     end
+    
     return true
 end
 
--- Break Block Dispatcher
-local function breakVoxelBlock(cell)
-    if not BreakBlockRemote then return false end
-    equipTool("Pickaxe")
-    local success = pcall(function()
-        BreakBlockRemote:FireServer(cell)
-    end)
-    return success
-end
-
 -- ========================================================================
--- AUTO BUILD ENGINE PRESETS
+-- CORE AUTO BUILD RUNNERS (TOGGLE DRIVEN)
 -- ========================================================================
 
--- 1. Complete Oval Coaster Circuit (Closed Loop with Power Boosters)
-local function buildCoasterCircuit(radiusX, radiusZ)
-    if State.IsBuilding then return end
-    State.IsBuilding = true
-    State.Status = "Building Coaster Circuit..."
-    
-    task.spawn(function()
-        local root = getRootPart()
-        if not root then State.IsBuilding = false return end
-        
-        local centerCell = worldToCell(root.Position + Vector3.new(0, 0, 0))
-        local rX = radiusX or 8
-        local rZ = radiusZ or 8
-        local y = centerCell.Y
-        
-        local trackCells = {}
-        
-        -- Generate outer rounded rectangle circuit
-        for x = -rX, rX do
-            table.insert(trackCells, {cell = Vector3.new(centerCell.X + x, y, centerCell.Z - rZ), rot = 0, isPower = (math.abs(x) % 3 == 0)})
-            table.insert(trackCells, {cell = Vector3.new(centerCell.X + x, y, centerCell.Z + rZ), rot = 2, isPower = (math.abs(x) % 3 == 0)})
-        end
-        for z = -rZ + 1, rZ - 1 do
-            table.insert(trackCells, {cell = Vector3.new(centerCell.X + rX, y, centerCell.Z + z), rot = 1, isPower = (math.abs(z) % 3 == 0)})
-            table.insert(trackCells, {cell = Vector3.new(centerCell.X - rX, y, centerCell.Z + z), rot = 3, isPower = (math.abs(z) % 3 == 0)})
-        end
-        
-        -- Build foundational support under the tracks first
-        for _, point in ipairs(trackCells) do
-            local baseCell = Vector3.new(point.cell.X, point.cell.Y - 1, point.cell.Z)
-            placeVoxelBlock(baseCell, "Oak Wood Plank", 0)
-            if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
-        end
-        
-        -- Place rails over foundation
-        for _, point in ipairs(trackCells) do
-            local railName = point.isPower and "Powered Rail - Active" or "Rail"
-            placeVoxelBlock(point.cell, railName, point.rot)
-            if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
-        end
-        
-        State.IsBuilding = false
-        State.Status = "Coaster Circuit Built!"
-    end)
-end
-
--- 2. Sky Spiral Tower Coaster
-local function buildSpiralCoaster(heightLevels, radius)
-    if State.IsBuilding then return end
-    State.IsBuilding = true
-    State.Status = "Building Spiral Coaster..."
-    
-    task.spawn(function()
-        local root = getRootPart()
-        if not root then State.IsBuilding = false return end
-        
-        local centerCell = worldToCell(root.Position)
-        local rad = radius or 4
-        local levels = heightLevels or 10
-        
-        local angle = 0
-        local stepAngle = math.pi / 4 -- 8 steps per circle
-        local currentY = centerCell.Y
-        
-        for i = 1, levels * 8 do
-            local cx = centerCell.X + math.round(math.cos(angle) * rad)
-            local cz = centerCell.Z + math.round(math.sin(angle) * rad)
-            currentY = centerCell.Y + math.floor(i / 2)
-            
-            local cPos = Vector3.new(cx, currentY, cz)
-            local pillarBase = Vector3.new(cx, currentY - 1, cz)
-            
-            -- Place pillar support
-            placeVoxelBlock(pillarBase, "Oak Wood Plank", 0)
-            if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
-            
-            -- Place chainlift rail going up
-            placeVoxelBlock(cPos, "Chainlift Rail", 0)
-            if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
-            
-            angle = angle + stepAngle
-        end
-        
-        State.IsBuilding = false
-        State.Status = "Spiral Coaster Built!"
-    end)
-end
-
--- 3. High-Speed Straight Runway
-local function buildRunway(length)
-    if State.IsBuilding then return end
-    State.IsBuilding = true
-    State.Status = "Building Speed Runway..."
-    
-    task.spawn(function()
-        local root = getRootPart()
-        if not root then State.IsBuilding = false return end
-        
-        local startCell = worldToCell(root.Position)
-        local lookDir = root.CFrame.LookVector
-        local dirX = math.abs(lookDir.X) > math.abs(lookDir.Z) and (lookDir.X > 0 and 1 or -1) or 0
-        local dirZ = dirX == 0 and (lookDir.Z > 0 and 1 or -1) or 0
-        
-        local len = length or 25
-        
-        for i = 1, len do
-            local curCell = Vector3.new(startCell.X + (dirX * i), startCell.Y, startCell.Z + (dirZ * i))
-            local underCell = Vector3.new(curCell.X, curCell.Y - 1, curCell.Z)
-            
-            -- Base block
-            placeVoxelBlock(underCell, "Stone Bricks", 0)
-            if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
-            
-            -- Launch / Powered rail
-            local railName = (i % 2 == 0) and "Launch Rail" or "Powered Rail - Active"
-            placeVoxelBlock(curCell, railName, 0)
-            if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
-        end
-        
-        State.IsBuilding = false
-        State.Status = "Runway Built!"
-    end)
-end
-
--- 4. Flat Floor / Platform Builder
-local function buildPlatform(size, blockType)
-    if State.IsBuilding then return end
-    State.IsBuilding = true
-    State.Status = "Building Platform (" .. tostring(size) .. "x" .. tostring(size) .. ")..."
-    
-    task.spawn(function()
-        local root = getRootPart()
-        if not root then State.IsBuilding = false return end
-        
-        local centerCell = worldToCell(root.Position)
-        local half = math.floor(size / 2)
-        local y = centerCell.Y - 1
-        
-        for x = -half, half do
-            for z = -half, half do
-                local targetCell = Vector3.new(centerCell.X + x, y, centerCell.Z + z)
-                placeVoxelBlock(targetCell, blockType or State.SelectedBlockType, 0)
-                if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
-            end
-        end
-        
-        State.IsBuilding = false
-        State.Status = "Platform Complete!"
-    end)
-end
-
--- 5. Sky Pillar / High Altitude Tower
-local function buildPillar(height, blockType)
-    if State.IsBuilding then return end
-    State.IsBuilding = true
-    State.Status = "Building Sky Pillar..."
-    
-    task.spawn(function()
-        local root = getRootPart()
-        if not root then State.IsBuilding = false return end
-        
-        local centerCell = worldToCell(root.Position)
-        local h = height or 25
-        
-        for y = 0, h do
-            local targetCell = Vector3.new(centerCell.X, centerCell.Y + y, centerCell.Z)
-            placeVoxelBlock(targetCell, blockType or State.SelectedBlockType, 0)
-            if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
-        end
-        
-        State.IsBuilding = false
-        State.Status = "Sky Pillar Complete!"
-    end)
-end
-
--- 6. Live Path Follower (Lays rails or blocks in front of player while walking/flying)
+-- 1. Closed Coaster Loop
 task.spawn(function()
     while State.Running do
-        if State.AutoRailPath and not State.IsBuilding then
+        if State.BuildCircuit then
+            State.Status = "Building Coaster Loop..."
+            local root = getRootPart()
+            if root then
+                local centerCell = worldToCell(root.Position)
+                local rX, rZ = 8, 8
+                local y = math.max(1, centerCell.Y + 1)
+                
+                local trackCells = {}
+                for x = -rX, rX do
+                    table.insert(trackCells, {cell = Vector3.new(centerCell.X + x, y, centerCell.Z - rZ), rot = 0, isPower = (math.abs(x) % 3 == 0)})
+                    table.insert(trackCells, {cell = Vector3.new(centerCell.X + x, y, centerCell.Z + rZ), rot = 2, isPower = (math.abs(x) % 3 == 0)})
+                end
+                for z = -rZ + 1, rZ - 1 do
+                    table.insert(trackCells, {cell = Vector3.new(centerCell.X + rX, y, centerCell.Z + z), rot = 1, isPower = (math.abs(z) % 3 == 0)})
+                    table.insert(trackCells, {cell = Vector3.new(centerCell.X - rX, y, centerCell.Z + z), rot = 3, isPower = (math.abs(z) % 3 == 0)})
+                end
+                
+                -- Place support foundation under track
+                for _, pt in ipairs(trackCells) do
+                    if not State.BuildCircuit then break end
+                    local baseCell = Vector3.new(pt.cell.X, pt.cell.Y - 1, pt.cell.Z)
+                    placeVoxelBlock(baseCell, "Oak Wood Plank", 0)
+                    if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
+                end
+                
+                -- Place rails
+                for _, pt in ipairs(trackCells) do
+                    if not State.BuildCircuit then break end
+                    local rail = pt.isPower and "Powered Rail - Active" or "Rail"
+                    placeVoxelBlock(pt.cell, rail, pt.rot)
+                    if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
+                end
+            end
+            State.BuildCircuit = false
+            State.Status = "Coaster Loop Complete!"
+        end
+        task.wait(0.3)
+    end
+end)
+
+-- 2. Large Oval Circuit
+task.spawn(function()
+    while State.Running do
+        if State.BuildOval then
+            State.Status = "Building Oval Circuit..."
+            local root = getRootPart()
+            if root then
+                local centerCell = worldToCell(root.Position)
+                local rX, rZ = 14, 8
+                local y = math.max(1, centerCell.Y + 1)
+                
+                local trackCells = {}
+                for x = -rX, rX do
+                    table.insert(trackCells, {cell = Vector3.new(centerCell.X + x, y, centerCell.Z - rZ), rot = 0, isPower = (math.abs(x) % 3 == 0)})
+                    table.insert(trackCells, {cell = Vector3.new(centerCell.X + x, y, centerCell.Z + rZ), rot = 2, isPower = (math.abs(x) % 3 == 0)})
+                end
+                for z = -rZ + 1, rZ - 1 do
+                    table.insert(trackCells, {cell = Vector3.new(centerCell.X + rX, y, centerCell.Z + z), rot = 1, isPower = (math.abs(z) % 3 == 0)})
+                    table.insert(trackCells, {cell = Vector3.new(centerCell.X - rX, y, centerCell.Z + z), rot = 3, isPower = (math.abs(z) % 3 == 0)})
+                end
+                
+                for _, pt in ipairs(trackCells) do
+                    if not State.BuildOval then break end
+                    local baseCell = Vector3.new(pt.cell.X, pt.cell.Y - 1, pt.cell.Z)
+                    placeVoxelBlock(baseCell, "Stone Bricks", 0)
+                    if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
+                end
+                
+                for _, pt in ipairs(trackCells) do
+                    if not State.BuildOval then break end
+                    local rail = pt.isPower and "Powered Rail - Active" or "Rail"
+                    placeVoxelBlock(pt.cell, rail, pt.rot)
+                    if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
+                end
+            end
+            State.BuildOval = false
+            State.Status = "Oval Circuit Complete!"
+        end
+        task.wait(0.3)
+    end
+end)
+
+-- 3. Sky Spiral Coaster
+task.spawn(function()
+    while State.Running do
+        if State.BuildSpiral then
+            State.Status = "Building Sky Spiral..."
+            local root = getRootPart()
+            if root then
+                local centerCell = worldToCell(root.Position)
+                local rad = 5
+                local levels = 8
+                local angle = 0
+                local stepAngle = math.pi / 4
+                
+                for i = 1, levels * 8 do
+                    if not State.BuildSpiral then break end
+                    local cx = centerCell.X + math.round(math.cos(angle) * rad)
+                    local cz = centerCell.Z + math.round(math.sin(angle) * rad)
+                    local curY = math.max(1, centerCell.Y + math.floor(i / 2))
+                    
+                    local cPos = Vector3.new(cx, curY, cz)
+                    local pillarBase = Vector3.new(cx, curY - 1, cz)
+                    
+                    placeVoxelBlock(pillarBase, "Oak Wood Plank", 0)
+                    if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
+                    
+                    placeVoxelBlock(cPos, "Chainlift Rail", 0)
+                    if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
+                    
+                    angle = angle + stepAngle
+                end
+            end
+            State.BuildSpiral = false
+            State.Status = "Sky Spiral Complete!"
+        end
+        task.wait(0.3)
+    end
+end)
+
+-- 4. High-Speed Straight Runway
+task.spawn(function()
+    while State.Running do
+        if State.BuildRunway then
+            State.Status = "Building Speed Runway..."
+            local root = getRootPart()
+            if root then
+                local startCell = worldToCell(root.Position)
+                local lookDir = root.CFrame.LookVector
+                local dirX = math.abs(lookDir.X) > math.abs(lookDir.Z) and (lookDir.X > 0 and 1 or -1) or 0
+                local dirZ = dirX == 0 and (lookDir.Z > 0 and 1 or -1) or 0
+                local len = 25
+                local curY = math.max(1, startCell.Y)
+                
+                for i = 1, len do
+                    if not State.BuildRunway then break end
+                    local curCell = Vector3.new(startCell.X + (dirX * i), curY, startCell.Z + (dirZ * i))
+                    local underCell = Vector3.new(curCell.X, curCell.Y - 1, curCell.Z)
+                    
+                    placeVoxelBlock(underCell, "Stone Bricks", 0)
+                    if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
+                    
+                    local rail = (i % 2 == 0) and "Launch Rail" or "Powered Rail - Active"
+                    placeVoxelBlock(curCell, rail, 0)
+                    if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
+                end
+            end
+            State.BuildRunway = false
+            State.Status = "Runway Complete!"
+        end
+        task.wait(0.3)
+    end
+end)
+
+-- 5. Flat Platform (10x10)
+task.spawn(function()
+    while State.Running do
+        if State.BuildPlatform then
+            State.Status = "Building Platform (10x10)..."
+            local root = getRootPart()
+            if root then
+                local centerCell = worldToCell(root.Position)
+                local half = 5
+                local y = math.max(0, centerCell.Y - 1)
+                
+                for x = -half, half do
+                    for z = -half, half do
+                        if not State.BuildPlatform then break end
+                        local targetCell = Vector3.new(centerCell.X + x, y, centerCell.Z + z)
+                        placeVoxelBlock(targetCell, State.SelectedBlockType, 0)
+                        if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
+                    end
+                end
+            end
+            State.BuildPlatform = false
+            State.Status = "Platform (10x10) Complete!"
+        end
+        task.wait(0.3)
+    end
+end)
+
+-- 6. Mega Platform (20x20)
+task.spawn(function()
+    while State.Running do
+        if State.BuildMegaPlatform then
+            State.Status = "Building Platform (20x20)..."
+            local root = getRootPart()
+            if root then
+                local centerCell = worldToCell(root.Position)
+                local half = 10
+                local y = math.max(0, centerCell.Y - 1)
+                
+                for x = -half, half do
+                    for z = -half, half do
+                        if not State.BuildMegaPlatform then break end
+                        local targetCell = Vector3.new(centerCell.X + x, y, centerCell.Z + z)
+                        placeVoxelBlock(targetCell, State.SelectedBlockType, 0)
+                        if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
+                    end
+                end
+            end
+            State.BuildMegaPlatform = false
+            State.Status = "Platform (20x20) Complete!"
+        end
+        task.wait(0.3)
+    end
+end)
+
+-- 7. Sky Pillar (Height 25)
+task.spawn(function()
+    while State.Running do
+        if State.BuildSkyPillar then
+            State.Status = "Building Sky Pillar..."
+            local root = getRootPart()
+            if root then
+                local centerCell = worldToCell(root.Position)
+                for y = 0, 25 do
+                    if not State.BuildSkyPillar then break end
+                    local targetCell = Vector3.new(centerCell.X, centerCell.Y + y, centerCell.Z)
+                    placeVoxelBlock(targetCell, State.SelectedBlockType, 0)
+                    if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
+                end
+            end
+            State.BuildSkyPillar = false
+            State.Status = "Sky Pillar Complete!"
+        end
+        task.wait(0.3)
+    end
+end)
+
+-- 8. Live Rail Path Follower (Lays rails as you move)
+task.spawn(function()
+    while State.Running do
+        if State.AutoRailPath then
             local root = getRootPart()
             if root then
                 local currentCell = worldToCell(root.Position)
                 local floorCell = Vector3.new(currentCell.X, currentCell.Y - 1, currentCell.Z)
                 local trackCell = Vector3.new(currentCell.X, currentCell.Y, currentCell.Z)
                 
-                -- Put support block under if empty
                 placeVoxelBlock(floorCell, State.SelectedBlockType, 0)
-                -- Put rail on feet level
                 placeVoxelBlock(trackCell, State.SelectedRailType, 0)
             end
         end
-        task.wait(0.2)
+        task.wait(0.18)
+    end
+end)
+
+-- 9. Auto Demolish / Clear Blocks
+task.spawn(function()
+    while State.Running do
+        if State.AutoClearBlocks then
+            if ClearAllRemote then
+                pcall(function() ClearAllRemote:FireServer() end)
+                State.Status = "Cleared Placed Blocks"
+            end
+            State.AutoClearBlocks = false
+        end
+        task.wait(0.5)
+    end
+end)
+
+-- 10. Stunt Loops & Presets Runners
+local function runStuntPreset(kind, r)
+    local root = getRootPart()
+    if root and PlaceLoopRemote then
+        local cell = worldToCell(root.Position + root.CFrame.LookVector * 10)
+        pcall(function()
+            PlaceLoopRemote:FireServer(cell, kind, 0, r, Vector3.new(0, 0, 1))
+        end)
+        State.Status = "Placed " .. kind
+    end
+end
+
+task.spawn(function()
+    while State.Running do
+        if State.LoopRail then runStuntPreset("loop", 6); State.LoopRail = false end
+        if State.MonsterLoop then runStuntPreset("loop", 16); State.MonsterLoop = false end
+        if State.MegaDrop then runStuntPreset("megadrop", 6); State.MegaDrop = false end
+        if State.Corkscrew then runStuntPreset("corkscrew", 6); State.Corkscrew = false end
+        if State.GiantDrop then runStuntPreset("giantdrop", 6); State.GiantDrop = false end
+        if State.CobraRoll then runStuntPreset("cobra", 6); State.CobraRoll = false end
+        if State.ZeroGRoll then runStuntPreset("zerog", 6); State.ZeroGRoll = false end
+        if State.AirtimeHills then runStuntPreset("airtime", 6); State.AirtimeHills = false end
+        if State.DoubleLoop then runStuntPreset("doubleloop", 6); State.DoubleLoop = false end
+        task.wait(0.3)
     end
 end)
 
 -- ========================================================================
--- CART & RIDE AUTOMATION
+-- MINECART & REWARDS AUTOMATION
 -- ========================================================================
-local function spawnCartOnNearestRail()
-    if not PlaceCartRemote then return end
-    local root = getRootPart()
-    if not root then return end
-    
-    local char = getCharacter()
-    equipTool("Minecart")
-    
-    local myCell = worldToCell(root.Position)
-    pcall(function()
-        PlaceCartRemote:FireServer(myCell)
-    end)
-    State.Status = "Spawned Minecart"
-end
-
-local function autoMountNearestCart()
-    local root = getRootPart()
-    if not root then return end
-    
-    local nearestCart = nil
-    local minDist = 50
-    
-    local cartsFolder = Workspace:FindFirstChild("Minecarts") or Workspace
-    for _, item in ipairs(cartsFolder:GetDescendants()) do
-        if item:IsA("VehicleSeat") or (item:IsA("Seat") and item.Name:lower():find("cart")) then
-            local dist = (item.Position - root.Position).Magnitude
-            if dist < minDist and not item.Occupant then
-                minDist = dist
-                nearestCart = item
-            end
-        end
-    end
-    
-    if nearestCart then
-        local hum = getHumanoid()
-        if hum then
-            nearestCart:Sit(hum)
-            State.Status = "Mounted Cart"
-        end
-    end
-end
-
--- Cart Speed Booster Loop
 task.spawn(function()
     while State.Running do
+        if State.AutoSpawnCart and PlaceCartRemote then
+            local root = getRootPart()
+            if root then
+                equipTool("Minecart")
+                local myCell = worldToCell(root.Position)
+                pcall(function() PlaceCartRemote:FireServer(myCell) end)
+                State.Status = "Spawned Cart"
+            end
+            State.AutoSpawnCart = false
+        end
+        
+        if State.AutoRideCart then
+            local root = getRootPart()
+            if root then
+                local nearest = nil
+                local minDist = 40
+                local cartsFolder = Workspace:FindFirstChild("Minecarts") or Workspace
+                for _, item in ipairs(cartsFolder:GetDescendants()) do
+                    if item:IsA("VehicleSeat") or (item:IsA("Seat") and item.Name:lower():find("cart")) then
+                        local d = (item.Position - root.Position).Magnitude
+                        if d < minDist and not item.Occupant then
+                            minDist = d
+                            nearest = item
+                        end
+                    end
+                end
+                if nearest then
+                    local hum = getHumanoid()
+                    if hum then nearest:Sit(hum); State.Status = "Mounted Cart" end
+                end
+            end
+        end
+        
         if State.BoostCartSpeed then
             local hum = getHumanoid()
             if hum and hum.SeatPart and hum.SeatPart:IsA("VehicleSeat") then
                 local seat = hum.SeatPart
-                seat.MaxSpeed = 100 * State.CartSpeedMultiplier
-                seat.Torque = 500000
-                local model = seat:FindFirstAncestorOfClass("Model")
-                if model and model.PrimaryPart then
-                    model.PrimaryPart.AssemblyLinearVelocity = model.PrimaryPart.CFrame.LookVector * (60 * State.CartSpeedMultiplier)
+                seat.MaxSpeed = 120 * State.CartSpeedMultiplier
+                seat.Torque = 600000
+                local mdl = seat:FindFirstAncestorOfClass("Model")
+                if mdl and mdl.PrimaryPart then
+                    mdl.PrimaryPart.AssemblyLinearVelocity = mdl.PrimaryPart.CFrame.LookVector * (65 * State.CartSpeedMultiplier)
                 end
             end
         end
-        task.wait(0.1)
-    end
-end)
-
--- Auto Rewards & Daily Claim Loop
-task.spawn(function()
-    while State.Running do
+        
         if State.AutoClaimDaily and DailyRemotes then
-            local claimDaily = DailyRemotes:FindFirstChild("ClaimDaily")
-            if claimDaily then
-                pcall(function() claimDaily:FireServer() end)
-            end
+            local cd = DailyRemotes:FindFirstChild("ClaimDaily")
+            if cd then pcall(function() cd:FireServer() end) end
         end
         if State.AutoClaimRewards and RewardRemotes then
-            local claimReward = RewardRemotes:FindFirstChild("ClaimReward")
-            if claimReward then
-                for i = 1, 12 do
-                    pcall(function() claimReward:FireServer(i) end)
-                    task.wait(0.1)
-                end
+            local cr = RewardRemotes:FindFirstChild("ClaimReward")
+            if cr then
+                for i = 1, 12 do pcall(function() cr:FireServer(i) end) end
             end
         end
-        task.wait(15)
+        
+        task.wait(1.5)
     end
 end)
 
--- ========================================================================
--- PLAYER MOVEMENT HACKS (SPEED, NOCLIP, FLY, INF JUMP)
--- ========================================================================
-local function applyPlayerStats()
-    local hum = getHumanoid()
-    if hum then
-        if State.SpeedHack then
-            hum.WalkSpeed = State.WalkSpeed
-        end
-        if State.JumpHack then
-            hum.UseJumpPower = true
-            hum.JumpPower = State.JumpPower
-        end
-    end
-end
-
--- Continuous Speed & Jump Enforcement
+-- Movement & Noclip
 RunService.RenderStepped:Connect(function()
     local hum = getHumanoid()
     if hum then
@@ -573,25 +609,19 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
--- Infinite Jump
 UserInputService.JumpRequest:Connect(function()
     if State.InfiniteJump then
         local hum = getHumanoid()
-        if hum then
-            hum:ChangeState(Enum.HumanoidStateType.Jumping)
-        end
+        if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
     end
 end)
 
--- Noclip Loop
 RunService.Stepped:Connect(function()
     if State.Noclip then
         local char = getCharacter()
         if char then
-            for _, part in ipairs(char:GetDescendants()) do
-                if part:IsA("BasePart") and part.CanCollide then
-                    part.CanCollide = false
-                end
+            for _, p in ipairs(char:GetDescendants()) do
+                if p:IsA("BasePart") and p.CanCollide then p.CanCollide = false end
             end
         end
     end
@@ -602,19 +632,16 @@ local flyBV, flyBG
 local function toggleFly(enable)
     local root = getRootPart()
     if not root then return end
-    
     if enable then
         if flyBV then flyBV:Destroy() end
         if flyBG then flyBG:Destroy() end
         
         flyBV = Instance.new("BodyVelocity")
-        flyBV.Name = "VCFlyBV"
         flyBV.MaxForce = Vector3.new(9e9, 9e9, 9e9)
         flyBV.Velocity = Vector3.zero
         flyBV.Parent = root
         
         flyBG = Instance.new("BodyGyro")
-        flyBG.Name = "VCFlyBG"
         flyBG.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
         flyBG.P = 15000
         flyBG.CFrame = root.CFrame
@@ -634,28 +661,15 @@ RunService.RenderStepped:Connect(function()
     if State.Fly and flyBV and flyBG then
         local root = getRootPart()
         if not root then return end
-        
         local moveDir = Vector3.zero
         local camCF = Camera.CFrame
         
-        if UserInputService:IsKeyDown(Enum.KeyCode.W) then
-            moveDir = moveDir + camCF.LookVector
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.S) then
-            moveDir = moveDir - camCF.LookVector
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.A) then
-            moveDir = moveDir - camCF.RightVector
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.D) then
-            moveDir = moveDir + camCF.RightVector
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
-            moveDir = moveDir + Vector3.new(0, 1, 0)
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
-            moveDir = moveDir - Vector3.new(0, 1, 0)
-        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir = moveDir + camCF.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir = moveDir - camCF.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir = moveDir - camCF.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir = moveDir + camCF.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then moveDir = moveDir + Vector3.new(0, 1, 0) end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then moveDir = moveDir - Vector3.new(0, 1, 0) end
         
         if moveDir.Magnitude > 0 then
             flyBV.Velocity = moveDir.Unit * State.FlySpeed
@@ -666,7 +680,6 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
--- 24/7 Anti-AFK
 LocalPlayer.Idled:Connect(function()
     if State.AntiAFK then
         VirtualUser:CaptureController()
@@ -675,733 +688,588 @@ LocalPlayer.Idled:Connect(function()
 end)
 
 -- ========================================================================
--- MONOCHROME USER INTERFACE (PURE BLACK BOXES, CRISP WHITE TEXT)
+-- PORTRAIT USER INTERFACE (PURE BLACK BOXES, CRISP WHITE TEXT)
 -- ========================================================================
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = GUI_NAME
 ScreenGui.ResetOnSpawn = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.DisplayOrder = 999999
+ScreenGui.IgnoreGuiInset = true
 ScreenGui.Parent = parentGui
 
--- Main Window Card
-local MainCard = Instance.new("Frame")
-MainCard.Name = "MainCard"
-MainCard.Size = UDim2.new(0, 500, 0, 390)
-MainCard.Position = UDim2.new(0.5, -250, 0.5, -195)
-MainCard.BackgroundColor3 = Theme.BgDark
-MainCard.BorderSizePixel = 0
-MainCard.ClipsDescendants = true
-MainCard.Active = true
-MainCard.Draggable = true
-MainCard.Parent = ScreenGui
-
-local CardCorner = Instance.new("UICorner")
-CardCorner.CornerRadius = UDim.new(0, 10)
-CardCorner.Parent = MainCard
-
-local CardStroke = Instance.new("UIStroke")
-CardStroke.Color = Theme.Border
-CardStroke.Thickness = 1.5
-CardStroke.Parent = MainCard
-
--- Header Bar
-local Header = Instance.new("Frame")
-Header.Name = "Header"
-Header.Size = UDim2.new(1, 0, 0, 46)
-Header.BackgroundColor3 = Theme.BgCard
-Header.BorderSizePixel = 0
-Header.Parent = MainCard
-
-local HeaderCorner = Instance.new("UICorner")
-HeaderCorner.CornerRadius = UDim.new(0, 10)
-HeaderCorner.Parent = Header
-
-local HeaderDivider = Instance.new("Frame")
-HeaderDivider.Size = UDim2.new(1, 0, 0, 1)
-HeaderDivider.Position = UDim2.new(0, 0, 1, -1)
-HeaderDivider.BackgroundColor3 = Theme.Border
-HeaderDivider.BorderSizePixel = 0
-HeaderDivider.Parent = Header
-
-local TitleLbl = Instance.new("TextLabel")
-TitleLbl.Name = "Title"
-TitleLbl.Size = UDim2.new(1, -90, 1, 0)
-TitleLbl.Position = UDim2.new(0, 15, 0, 0)
-TitleLbl.BackgroundTransparency = 1
-TitleLbl.Font = Enum.Font.GothamBold
-TitleLbl.Text = "VOXEL COASTER  |  AUTO BUILD"
-TitleLbl.TextColor3 = Theme.White
-TitleLbl.TextSize = 14
-TitleLbl.TextXAlignment = Enum.TextXAlignment.Left
-TitleLbl.Parent = Header
-
-local CloseBtn = Instance.new("TextButton")
-CloseBtn.Name = "CloseBtn"
-CloseBtn.Size = UDim2.new(0, 30, 0, 30)
-CloseBtn.Position = UDim2.new(1, -38, 0, 8)
-CloseBtn.BackgroundColor3 = Theme.BgInput
-CloseBtn.Font = Enum.Font.GothamBold
-CloseBtn.Text = "X"
-CloseBtn.TextColor3 = Theme.White
-CloseBtn.TextSize = 13
-CloseBtn.AutoButtonColor = false
-CloseBtn.Parent = Header
-
-local CloseCorner = Instance.new("UICorner")
-CloseCorner.CornerRadius = UDim.new(0, 6)
-CloseCorner.Parent = CloseBtn
-
-local CloseStroke = Instance.new("UIStroke")
-CloseStroke.Color = Theme.Border
-CloseStroke.Thickness = 1
-CloseStroke.Parent = CloseBtn
-
-CloseBtn.MouseButton1Click:Connect(function()
-    ScreenGui.Enabled = not ScreenGui.Enabled
-end)
+local function makeDraggable(frame, handle)
+    handle = handle or frame
+    local drag, dInp, dSt, dP0
+    handle.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            drag = true; dSt = i.Position; dP0 = frame.Position
+            i.Changed:Connect(function()
+                if i.UserInputState == Enum.UserInputState.End then drag = false end
+            end)
+        end
+    end)
+    handle.InputChanged:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch then dInp = i end
+    end)
+    UserInputService.InputChanged:Connect(function(i)
+        if i == dInp and drag then
+            local d = i.Position - dSt
+            frame.Position = UDim2.new(dP0.X.Scale, dP0.X.Offset + d.X, dP0.Y.Scale, dP0.Y.Offset + d.Y)
+        end
+    end)
+end
 
 -- Mobile Floating Re-Open Button
 local OpenGui = Instance.new("ScreenGui")
 OpenGui.Name = TOGGLE_NAME
 OpenGui.ResetOnSpawn = false
+OpenGui.DisplayOrder = 999998
+OpenGui.IgnoreGuiInset = true
 OpenGui.Parent = parentGui
 
-local FloatBtn = Instance.new("TextButton")
-FloatBtn.Name = "OpenButton"
-FloatBtn.Size = UDim2.new(0, 105, 0, 34)
-FloatBtn.Position = UDim2.new(0, 15, 0.5, -17)
-FloatBtn.BackgroundColor3 = Theme.BgDark
-FloatBtn.Font = Enum.Font.GothamBold
+local FloatBtn = Instance.new("TextButton", OpenGui)
+FloatBtn.Name = "FloatToggle"
+FloatBtn.Size = UDim2.new(0, 92, 0, 32)
+FloatBtn.Position = UDim2.new(0, 15, 0.45, 0)
+FloatBtn.BackgroundColor3 = Theme.BG
+FloatBtn.BorderSizePixel = 0
+FloatBtn.Font = Theme.FontB
 FloatBtn.Text = "AUTO BUILD"
 FloatBtn.TextColor3 = Theme.White
-FloatBtn.TextSize = 12
+FloatBtn.TextSize = 11
 FloatBtn.Active = true
-FloatBtn.Draggable = true
-FloatBtn.Parent = OpenGui
+Instance.new("UICorner", FloatBtn).CornerRadius = UDim.new(0, 6)
+local fS = Instance.new("UIStroke", FloatBtn)
+fS.Color = Theme.White; fS.Thickness = 1.2
+makeDraggable(FloatBtn)
 
-local FloatCorner = Instance.new("UICorner")
-FloatCorner.CornerRadius = UDim.new(0, 8)
-FloatCorner.Parent = FloatBtn
+-- Main Portrait Panel
+local curW = 270
+local curH = 380
+local isMin = false
 
-local FloatStroke = Instance.new("UIStroke")
-FloatStroke.Color = Theme.White
-FloatStroke.Thickness = 1.2
-FloatStroke.Parent = FloatBtn
+local Main = Instance.new("Frame", ScreenGui)
+Main.Name = "MainPanel"
+Main.Size = UDim2.new(0, curW, 0, curH)
+Main.Position = UDim2.new(0.5, -135, 0.5, -190)
+Main.BackgroundColor3 = Theme.BG
+Main.BorderSizePixel = 0
+Main.Active = true
+Main.ClipsDescendants = true
+Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 8)
+local mS = Instance.new("UIStroke", Main)
+mS.Color = Theme.Border; mS.Thickness = 1.2
 
+-- Global Scale Controller
+local GlobalScale = Instance.new("UIScale", Main)
+GlobalScale.Scale = State.UiScale
+
+local function setScale(val)
+    val = math.clamp(val, 0.5, 1.6)
+    State.UiScale = val
+    GlobalScale.Scale = val
+end
+
+-- Header
+local Hdr = Instance.new("Frame", Main)
+Hdr.Name = "Header"
+Hdr.Size = UDim2.new(1, 0, 0, 32)
+Hdr.BackgroundColor3 = Theme.Header
+Hdr.BorderSizePixel = 0
+Hdr.ZIndex = 10
+Instance.new("UICorner", Hdr).CornerRadius = UDim.new(0, 8)
+
+local Ttl = Instance.new("TextLabel", Hdr)
+Ttl.Size = UDim2.new(1, -110, 1, 0)
+Ttl.Position = UDim2.new(0, 10, 0, 0)
+Ttl.BackgroundTransparency = 1
+Ttl.Font = Theme.FontB
+Ttl.Text = "AUTO BUILDER"
+Ttl.TextColor3 = Theme.White
+Ttl.TextSize = 11.5
+Ttl.TextXAlignment = Enum.TextXAlignment.Left
+Ttl.ZIndex = 11
+
+-- Scale Down Button (-)
+local ScaleMinus = Instance.new("TextButton", Hdr)
+ScaleMinus.Size = UDim2.new(0, 20, 0, 20)
+ScaleMinus.Position = UDim2.new(1, -100, 0.5, -10)
+ScaleMinus.BackgroundColor3 = Theme.ItemBg
+ScaleMinus.Text = "-"
+ScaleMinus.Font = Theme.FontB
+ScaleMinus.TextColor3 = Theme.White
+ScaleMinus.TextSize = 13
+ScaleMinus.AutoButtonColor = false
+ScaleMinus.ZIndex = 12
+Instance.new("UICorner", ScaleMinus).CornerRadius = UDim.new(0, 4)
+
+-- Scale Up Button (+)
+local ScalePlus = Instance.new("TextButton", Hdr)
+ScalePlus.Size = UDim2.new(0, 20, 0, 20)
+ScalePlus.Position = UDim2.new(1, -76, 0.5, -10)
+ScalePlus.BackgroundColor3 = Theme.ItemBg
+ScalePlus.Text = "+"
+ScalePlus.Font = Theme.FontB
+ScalePlus.TextColor3 = Theme.White
+ScalePlus.TextSize = 13
+ScalePlus.AutoButtonColor = false
+ScalePlus.ZIndex = 12
+Instance.new("UICorner", ScalePlus).CornerRadius = UDim.new(0, 4)
+
+-- Minimize Button (_)
+local MinB = Instance.new("TextButton", Hdr)
+MinB.Size = UDim2.new(0, 20, 0, 20)
+MinB.Position = UDim2.new(1, -52, 0.5, -10)
+MinB.BackgroundColor3 = Theme.ItemBg
+MinB.Text = "_"
+MinB.Font = Theme.FontB
+MinB.TextColor3 = Theme.Muted
+MinB.TextSize = 10
+MinB.AutoButtonColor = false
+MinB.ZIndex = 12
+Instance.new("UICorner", MinB).CornerRadius = UDim.new(0, 4)
+
+-- Close Button (X)
+local XBtn = Instance.new("TextButton", Hdr)
+XBtn.Size = UDim2.new(0, 20, 0, 20)
+XBtn.Position = UDim2.new(1, -28, 0.5, -10)
+XBtn.BackgroundColor3 = Color3.fromRGB(35, 18, 18)
+XBtn.Text = "X"
+XBtn.Font = Theme.FontB
+XBtn.TextColor3 = Theme.Red
+XBtn.TextSize = 10.5
+XBtn.AutoButtonColor = false
+XBtn.ZIndex = 12
+Instance.new("UICorner", XBtn).CornerRadius = UDim.new(0, 4)
+
+-- Category Navigation Bar
+local CatBar = Instance.new("Frame", Main)
+CatBar.Name = "CategoryBar"
+CatBar.Size = UDim2.new(1, -10, 0, 26)
+CatBar.Position = UDim2.new(0, 5, 0, 36)
+CatBar.BackgroundTransparency = 1
+CatBar.ZIndex = 5
+
+local CatLayout = Instance.new("UIListLayout", CatBar)
+CatLayout.FillDirection = Enum.FillDirection.Horizontal
+CatLayout.Padding = UDim.new(0, 4)
+CatLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+-- Scrolling Body
+local Scroll = Instance.new("ScrollingFrame", Main)
+Scroll.Size = UDim2.new(1, -10, 1, -88)
+Scroll.Position = UDim2.new(0, 5, 0, 66)
+Scroll.BackgroundTransparency = 1
+Scroll.BorderSizePixel = 0
+Scroll.ScrollBarThickness = 2.5
+Scroll.ScrollBarImageColor3 = Theme.White
+Scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+Scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+Scroll.ZIndex = 2
+
+local SL = Instance.new("UIListLayout", Scroll)
+SL.Padding = UDim.new(0, 5)
+SL.SortOrder = Enum.SortOrder.LayoutOrder
+
+-- Footer (Status & Resize Grip)
+local Ftr = Instance.new("Frame", Main)
+Ftr.Size = UDim2.new(1, 0, 0, 22)
+Ftr.Position = UDim2.new(0, 0, 1, -22)
+Ftr.BackgroundColor3 = Theme.Header
+Ftr.BorderSizePixel = 0
+Ftr.ZIndex = 3
+
+local FtrL = Instance.new("TextLabel", Ftr)
+FtrL.Name = "Status"
+FtrL.Size = UDim2.new(1, -80, 1, 0)
+FtrL.Position = UDim2.new(0, 8, 0, 0)
+FtrL.BackgroundTransparency = 1
+FtrL.Font = Theme.FontR
+FtrL.Text = "Status: Ready"
+FtrL.TextColor3 = Theme.White
+FtrL.TextSize = 10
+FtrL.TextXAlignment = Enum.TextXAlignment.Left
+FtrL.ZIndex = 4
+
+-- Dynamic Corner Resize Grip
+local ResizeHandle = Instance.new("TextButton", Main)
+ResizeHandle.Name = "ResizeGrip"
+ResizeHandle.Size = UDim2.new(0, 64, 0, 18)
+ResizeHandle.Position = UDim2.new(1, -66, 1, -20)
+ResizeHandle.BackgroundColor3 = Theme.ItemBg
+ResizeHandle.Text = "RESIZE ///"
+ResizeHandle.Font = Theme.FontB
+ResizeHandle.TextColor3 = Theme.Muted
+ResizeHandle.TextSize = 9
+ResizeHandle.AutoButtonColor = false
+ResizeHandle.BorderSizePixel = 0
+ResizeHandle.ZIndex = 5
+Instance.new("UICorner", ResizeHandle).CornerRadius = UDim.new(0, 4)
+
+-- Minimize / Restore Function
+local function toggleMinimize(target)
+    if target ~= nil then isMin = target else isMin = not isMin end
+    if isMin then
+        CatBar.Visible = false
+        Scroll.Visible = false
+        Ftr.Visible = false
+        ResizeHandle.Visible = false
+        MinB.Text = "+"
+        Ttl.Text = "AUTO BUILDER [CLICK +]"
+        TweenService:Create(Main, TweenInfo.new(0.2), {Size = UDim2.new(0, curW, 0, 32)}):Play()
+    else
+        MinB.Text = "_"
+        Ttl.Text = "AUTO BUILDER"
+        CatBar.Visible = true
+        Scroll.Visible = true
+        Ftr.Visible = true
+        ResizeHandle.Visible = true
+        TweenService:Create(Main, TweenInfo.new(0.2), {Size = UDim2.new(0, curW, 0, curH)}):Play()
+    end
+end
+
+makeDraggable(Main, Hdr)
 FloatBtn.MouseButton1Click:Connect(function()
-    ScreenGui.Enabled = not ScreenGui.Enabled
+    Main.Visible = not Main.Visible
+    if Main.Visible and isMin then toggleMinimize(false) end
 end)
 
--- Sidebar Tabs
-local Sidebar = Instance.new("Frame")
-Sidebar.Name = "Sidebar"
-Sidebar.Size = UDim2.new(0, 130, 1, -46)
-Sidebar.Position = UDim2.new(0, 0, 0, 46)
-Sidebar.BackgroundColor3 = Theme.BgCard
-Sidebar.BorderSizePixel = 0
-Sidebar.Parent = MainCard
+XBtn.MouseButton1Click:Connect(function() Main.Visible = false end)
+MinB.MouseButton1Click:Connect(function() toggleMinimize() end)
+ScaleMinus.MouseButton1Click:Connect(function() setScale(State.UiScale - 0.1) end)
+ScalePlus.MouseButton1Click:Connect(function() setScale(State.UiScale + 0.1) end)
 
-local SidebarDivider = Instance.new("Frame")
-SidebarDivider.Size = UDim2.new(0, 1, 1, 0)
-SidebarDivider.Position = UDim2.new(1, -1, 0, 0)
-SidebarDivider.BackgroundColor3 = Theme.Border
-SidebarDivider.BorderSizePixel = 0
-SidebarDivider.Parent = Sidebar
+-- Dynamic Drag Resize Handler
+local resizing = false
+local rStartPos, rStartSize
+ResizeHandle.InputBegan:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+        resizing = true
+        rStartPos = i.Position
+        rStartSize = Vector2.new(Main.AbsoluteSize.X, Main.AbsoluteSize.Y)
+        i.Changed:Connect(function()
+            if i.UserInputState == Enum.UserInputState.End then resizing = false end
+        end)
+    end
+end)
 
-local SidebarLayout = Instance.new("UIListLayout")
-SidebarLayout.Padding = UDim.new(0, 6)
-SidebarLayout.SortOrder = Enum.SortOrder.LayoutOrder
-SidebarLayout.Parent = Sidebar
+UserInputService.InputChanged:Connect(function(i)
+    if resizing and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+        local delta = (i.Position - rStartPos) / (GlobalScale.Scale or 1)
+        local newW = math.clamp(rStartSize.X + delta.X, 220, 480)
+        local newH = math.clamp(rStartSize.Y + delta.Y, 260, 650)
+        curW = newW
+        curH = newH
+        if not isMin then Main.Size = UDim2.new(0, newW, 0, newH) end
+    end
+end)
 
-local SidebarPad = Instance.new("UIPadding")
-SidebarPad.PaddingTop = UDim.new(0, 10)
-SidebarPad.PaddingLeft = UDim.new(0, 8)
-SidebarPad.PaddingRight = UDim.new(0, 8)
-SidebarPad.Parent = Sidebar
+-- ========================================================================
+-- CATEGORY SYSTEM & UI HELPERS (STRICT TOGGLES ONLY)
+-- ========================================================================
+local CategoryPages = {}
+local CategoryButtons = {}
+local activeCategory = "TRACKS"
 
--- Content Container
-local ContentContainer = Instance.new("Frame")
-ContentContainer.Name = "Content"
-ContentContainer.Size = UDim2.new(1, -140, 1, -54)
-ContentContainer.Position = UDim2.new(0, 135, 0, 50)
-ContentContainer.BackgroundTransparency = 1
-ContentContainer.Parent = MainCard
-
-local Tabs = {}
-local TabButtons = {}
-
-local function createTab(tabName, layoutOrder)
-    local tabBtn = Instance.new("TextButton")
-    tabBtn.Name = tabName .. "Btn"
-    tabBtn.Size = UDim2.new(1, 0, 0, 32)
-    tabBtn.BackgroundColor3 = layoutOrder == 1 and Theme.BgInput or Theme.BgCard
-    tabBtn.BorderSizePixel = 0
-    tabBtn.Font = Enum.Font.GothamMedium
-    tabBtn.Text = tabName
-    tabBtn.TextColor3 = layoutOrder == 1 and Theme.White or Theme.DarkMuted
-    tabBtn.TextSize = 12
-    tabBtn.LayoutOrder = layoutOrder
-    tabBtn.Parent = Sidebar
-
-    local btnCorner = Instance.new("UICorner")
-    btnCorner.CornerRadius = UDim.new(0, 6)
-    btnCorner.Parent = tabBtn
-
-    local btnStroke = Instance.new("UIStroke")
-    btnStroke.Color = layoutOrder == 1 and Theme.BorderLight or Theme.Border
-    btnStroke.Thickness = 1
-    btnStroke.Parent = tabBtn
-
-    local page = Instance.new("ScrollingFrame")
-    page.Name = tabName .. "Page"
-    page.Size = UDim2.new(1, 0, 1, 0)
-    page.BackgroundTransparency = 1
-    page.BorderSizePixel = 0
-    page.ScrollBarThickness = 3
-    page.ScrollBarImageColor3 = Theme.White
-    page.Visible = layoutOrder == 1
-    page.CanvasSize = UDim2.new(0, 0, 0, 0)
-    page.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    page.Parent = ContentContainer
-
-    local pageLayout = Instance.new("UIListLayout")
-    pageLayout.Padding = UDim.new(0, 8)
-    pageLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    pageLayout.Parent = page
-
-    local pagePad = Instance.new("UIPadding")
-    pagePad.PaddingTop = UDim.new(0, 4)
-    pagePad.PaddingRight = UDim.new(0, 8)
-    pagePad.PaddingBottom = UDim.new(0, 10)
-    pagePad.Parent = page
-
-    Tabs[tabName] = page
-    TabButtons[tabName] = {btn = tabBtn, stroke = btnStroke}
-
-    tabBtn.MouseButton1Click:Connect(function()
-        for name, p in pairs(Tabs) do
-            p.Visible = (name == tabName)
+local function AddCategory(name)
+    local btn = Instance.new("TextButton", CatBar)
+    btn.Size = UDim2.new(0.24, -2, 1, 0)
+    btn.BackgroundColor3 = Theme.ItemBg
+    btn.Text = name
+    btn.Font = Theme.FontB
+    btn.TextColor3 = Theme.DarkMuted
+    btn.TextSize = 9.5
+    btn.AutoButtonColor = false
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
+    local st = Instance.new("UIStroke", btn)
+    st.Color = Theme.Border; st.Thickness = 1
+    
+    local container = Instance.new("Frame", Scroll)
+    container.Size = UDim2.new(1, 0, 0, 0)
+    container.BackgroundTransparency = 1
+    container.AutomaticSize = Enum.AutomaticSize.Y
+    container.Visible = false
+    
+    local layout = Instance.new("UIListLayout", container)
+    layout.Padding = UDim.new(0, 4)
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    
+    CategoryPages[name] = container
+    CategoryButtons[name] = {btn = btn, stroke = st}
+    
+    btn.MouseButton1Click:Connect(function()
+        for cat, page in pairs(CategoryPages) do
+            page.Visible = (cat == name)
         end
-        for name, item in pairs(TabButtons) do
-            local active = (name == tabName)
-            item.btn.BackgroundColor3 = active and Theme.BgInput or Theme.BgCard
-            item.btn.TextColor3 = active and Theme.White or Theme.DarkMuted
-            item.stroke.Color = active and Theme.BorderLight or Theme.Border
+        for cat, item in pairs(CategoryButtons) do
+            local isAct = (cat == name)
+            item.btn.TextColor3 = isAct and Theme.White or Theme.DarkMuted
+            item.stroke.Color = isAct and Theme.White or Theme.Border
         end
+        activeCategory = name
     end)
-
-    return page
+    
+    return container
 end
 
--- Create Pages
-local CoasterTab   = createTab("Coasters", 1)
-local StructureTab = createTab("Structures", 2)
-local PresetsTab   = createTab("Loops & Packs", 3)
-local CartTab      = createTab("Minecart", 4)
-local EconomyTab   = createTab("Rewards", 5)
-local PlayerTab    = createTab("Player/Misc", 6)
+local PageTracks     = AddCategory("TRACKS")
+local PageStructures = AddCategory("BUILDS")
+local PageStunts     = AddCategory("LOOPS")
+local PagePlayer     = AddCategory("PLAYER")
 
--- ========================================================================
--- UI BUILDER HELPERS (BLACK & WHITE THEME)
--- ========================================================================
+-- Set Default Category Active
+CategoryPages["TRACKS"].Visible = true
+CategoryButtons["TRACKS"].btn.TextColor3 = Theme.White
+CategoryButtons["TRACKS"].stroke.Color = Theme.White
 
--- Helper: Section Header
-local function createSection(parent, title)
-    local sec = Instance.new("Frame")
-    sec.Size = UDim2.new(1, 0, 0, 24)
-    sec.BackgroundTransparency = 1
-    sec.Parent = parent
-
-    local lbl = Instance.new("TextLabel")
-    lbl.Size = UDim2.new(1, 0, 1, 0)
-    lbl.BackgroundTransparency = 1
-    lbl.Font = Enum.Font.GothamBold
-    lbl.Text = string.upper(title)
-    lbl.TextColor3 = Theme.White
-    lbl.TextSize = 11
-    lbl.TextXAlignment = Enum.TextXAlignment.Left
-    lbl.Parent = sec
-
-    local line = Instance.new("Frame")
-    line.Size = UDim2.new(1, 0, 0, 1)
-    line.Position = UDim2.new(0, 0, 1, -2)
-    line.BackgroundColor3 = Theme.Border
-    line.BorderSizePixel = 0
-    line.Parent = sec
+-- Helper: Section Divider
+local function AddSection(parent, title)
+    local f = Instance.new("Frame", parent)
+    f.Size = UDim2.new(1, 0, 0, 18)
+    f.BackgroundTransparency = 1
+    local l = Instance.new("TextLabel", f)
+    l.Size = UDim2.new(1, 0, 1, 0)
+    l.BackgroundTransparency = 1
+    l.Font = Theme.FontB
+    l.Text = "  " .. title:upper()
+    l.TextColor3 = Theme.White
+    l.TextSize = 9.5
+    l.TextXAlignment = Enum.TextXAlignment.Left
+    local ln = Instance.new("Frame", f)
+    ln.Size = UDim2.new(1, -6, 0, 1)
+    ln.Position = UDim2.new(0, 3, 1, -1)
+    ln.BackgroundColor3 = Theme.Border
+    ln.BorderSizePixel = 0
 end
 
--- Helper: Toggle
-local function createToggle(parent, title, desc, defaultState, callback)
-    local card = Instance.new("Frame")
-    card.Name = title .. "Card"
-    card.Size = UDim2.new(1, 0, 0, 46)
-    card.BackgroundColor3 = Theme.BgCard
-    card.BorderSizePixel = 0
-    card.Parent = parent
+-- Helper: Pure ON/OFF Toggle Card (No Execute Button!)
+local function AddToggle(parent, title, desc, defaultVal, callback)
+    local state = defaultVal or false
+    local row = Instance.new("Frame", parent)
+    row.Size = UDim2.new(1, 0, 0, 34)
+    row.BackgroundColor3 = Theme.ItemBg
+    row.BorderSizePixel = 0
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
+    local sk = Instance.new("UIStroke", row)
+    sk.Color = Theme.Border; sk.Thickness = 1
 
-    local cardCorner = Instance.new("UICorner")
-    cardCorner.CornerRadius = UDim.new(0, 8)
-    cardCorner.Parent = card
+    local tLbl = Instance.new("TextLabel", row)
+    tLbl.Size = UDim2.new(1, -52, 0, 16)
+    tLbl.Position = UDim2.new(0, 8, 0, 2)
+    tLbl.BackgroundTransparency = 1
+    tLbl.Font = Theme.FontB
+    tLbl.Text = title
+    tLbl.TextColor3 = Theme.White
+    tLbl.TextSize = 10.5
+    tLbl.TextXAlignment = Enum.TextXAlignment.Left
+    tLbl.TextTruncate = Enum.TextTruncate.AtEnd
 
-    local cardStroke = Instance.new("UIStroke")
-    cardStroke.Color = Theme.Border
-    cardStroke.Thickness = 1
-    cardStroke.Parent = card
+    local dLbl = Instance.new("TextLabel", row)
+    dLbl.Size = UDim2.new(1, -52, 0, 14)
+    dLbl.Position = UDim2.new(0, 8, 0, 18)
+    dLbl.BackgroundTransparency = 1
+    dLbl.Font = Theme.FontR
+    dLbl.Text = desc
+    dLbl.TextColor3 = Theme.Muted
+    dLbl.TextSize = 8.5
+    dLbl.TextXAlignment = Enum.TextXAlignment.Left
+    dLbl.TextTruncate = Enum.TextTruncate.AtEnd
 
-    local tLabel = Instance.new("TextLabel")
-    tLabel.Size = UDim2.new(1, -60, 0, 20)
-    tLabel.Position = UDim2.new(0, 10, 0, 4)
-    tLabel.BackgroundTransparency = 1
-    tLabel.Font = Enum.Font.GothamBold
-    tLabel.Text = title
-    tLabel.TextColor3 = Theme.White
-    tLabel.TextSize = 12
-    tLabel.TextXAlignment = Enum.TextXAlignment.Left
-    tLabel.Parent = card
+    local box = Instance.new("TextButton", row)
+    box.Size = UDim2.new(0, 38, 0, 18)
+    box.Position = UDim2.new(1, -44, 0.5, -9)
+    box.BackgroundColor3 = state and Theme.ToggleON or Theme.ToggleOFF
+    box.Text = state and "ON" or "OFF"
+    box.Font = Theme.FontB
+    box.TextColor3 = state and Theme.BG or Theme.Muted
+    box.TextSize = 9.5
+    box.AutoButtonColor = false
+    Instance.new("UICorner", box).CornerRadius = UDim.new(0, 4)
+    local bStroke = Instance.new("UIStroke", box)
+    bStroke.Color = state and Theme.White or Theme.BorderLight
+    bStroke.Thickness = 1
 
-    local dLabel = Instance.new("TextLabel")
-    dLabel.Size = UDim2.new(1, -60, 0, 16)
-    dLabel.Position = UDim2.new(0, 10, 0, 24)
-    dLabel.BackgroundTransparency = 1
-    dLabel.Font = Enum.Font.Gotham
-    dLabel.Text = desc
-    dLabel.TextColor3 = Theme.Muted
-    dLabel.TextSize = 10
-    dLabel.TextXAlignment = Enum.TextXAlignment.Left
-    dLabel.Parent = card
-
-    local toggleBtn = Instance.new("TextButton")
-    toggleBtn.Name = "Toggle"
-    toggleBtn.Size = UDim2.new(0, 40, 0, 22)
-    toggleBtn.Position = UDim2.new(1, -48, 0.5, -11)
-    toggleBtn.BackgroundColor3 = defaultState and Theme.White or Theme.BgInput
-    toggleBtn.Text = ""
-    toggleBtn.AutoButtonColor = false
-    toggleBtn.Parent = card
-
-    local toggleCorner = Instance.new("UICorner")
-    toggleCorner.CornerRadius = UDim.new(1, 0)
-    toggleCorner.Parent = toggleBtn
-
-    local toggleStroke = Instance.new("UIStroke")
-    toggleStroke.Color = Theme.BorderLight
-    toggleStroke.Thickness = 1
-    toggleStroke.Parent = toggleBtn
-
-    local circle = Instance.new("Frame")
-    circle.Name = "Circle"
-    circle.Size = UDim2.new(0, 16, 0, 16)
-    circle.Position = defaultState and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
-    circle.BackgroundColor3 = defaultState and Theme.BgDark or Theme.White
-    circle.BorderSizePixel = 0
-    circle.Parent = toggleBtn
-
-    local circleCorner = Instance.new("UICorner")
-    circleCorner.CornerRadius = UDim.new(1, 0)
-    circleCorner.Parent = circle
-
-    local active = defaultState
-
-    local function updateState()
-        TweenService:Create(toggleBtn, TweenInfo.new(0.2), {
-            BackgroundColor3 = active and Theme.White or Theme.BgInput
-        }):Play()
-        TweenService:Create(circle, TweenInfo.new(0.2), {
-            Position = active and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8),
-            BackgroundColor3 = active and Theme.BgDark or Theme.White
-        }):Play()
+    local function flip(v)
+        state = v
+        box.BackgroundColor3 = state and Theme.ToggleON or Theme.ToggleOFF
+        box.Text = state and "ON" or "OFF"
+        box.TextColor3 = state and Theme.BG or Theme.Muted
+        bStroke.Color = state and Theme.White or Theme.BorderLight
+        pcall(callback, state)
     end
 
-    toggleBtn.MouseButton1Click:Connect(function()
-        active = not active
-        updateState()
-        callback(active)
-    end)
+    box.MouseButton1Click:Connect(function() flip(not state) end)
+    
+    local clickArea = Instance.new("TextButton", row)
+    clickArea.Size = UDim2.new(1, -48, 1, 0)
+    clickArea.BackgroundTransparency = 1
+    clickArea.Text = ""
+    clickArea.MouseButton1Click:Connect(function() flip(not state) end)
 
     return {
-        Set = function(val)
-            active = val
-            updateState()
-            callback(active)
-        end
+        Set = function(v) flip(v) end
     }
 end
 
--- Helper: Action Button
-local function createButton(parent, title, desc, callback)
-    local card = Instance.new("Frame")
-    card.Size = UDim2.new(1, 0, 0, 46)
-    card.BackgroundColor3 = Theme.BgCard
-    card.BorderSizePixel = 0
-    card.Parent = parent
-
-    local cardCorner = Instance.new("UICorner")
-    cardCorner.CornerRadius = UDim.new(0, 8)
-    cardCorner.Parent = card
-
-    local cardStroke = Instance.new("UIStroke")
-    cardStroke.Color = Theme.Border
-    cardStroke.Thickness = 1
-    cardStroke.Parent = card
-
-    local tLabel = Instance.new("TextLabel")
-    tLabel.Size = UDim2.new(1, -110, 0, 20)
-    tLabel.Position = UDim2.new(0, 10, 0, 4)
-    tLabel.BackgroundTransparency = 1
-    tLabel.Font = Enum.Font.GothamBold
-    tLabel.Text = title
-    tLabel.TextColor3 = Theme.White
-    tLabel.TextSize = 12
-    tLabel.TextXAlignment = Enum.TextXAlignment.Left
-    tLabel.Parent = card
-
-    local dLabel = Instance.new("TextLabel")
-    dLabel.Size = UDim2.new(1, -110, 0, 16)
-    dLabel.Position = UDim2.new(0, 10, 0, 24)
-    dLabel.BackgroundTransparency = 1
-    dLabel.Font = Enum.Font.Gotham
-    dLabel.Text = desc
-    dLabel.TextColor3 = Theme.Muted
-    dLabel.TextSize = 10
-    dLabel.TextXAlignment = Enum.TextXAlignment.Left
-    dLabel.Parent = card
-
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0, 85, 0, 28)
-    btn.Position = UDim2.new(1, -95, 0.5, -14)
-    btn.BackgroundColor3 = Theme.BgInput
-    btn.Font = Enum.Font.GothamBold
-    btn.Text = "EXECUTE"
-    btn.TextColor3 = Theme.White
-    btn.TextSize = 11
-    btn.AutoButtonColor = false
-    btn.Parent = card
-
-    local btnCorner = Instance.new("UICorner")
-    btnCorner.CornerRadius = UDim.new(0, 6)
-    btnCorner.Parent = btn
-
-    local btnStroke = Instance.new("UIStroke")
-    btnStroke.Color = Theme.BorderLight
-    btnStroke.Thickness = 1
-    btnStroke.Parent = btn
-
-    btn.MouseEnter:Connect(function()
-        TweenService:Create(btn, TweenInfo.new(0.15), {BackgroundColor3 = Theme.BgHover}):Play()
-    end)
-    btn.MouseLeave:Connect(function()
-        TweenService:Create(btn, TweenInfo.new(0.15), {BackgroundColor3 = Theme.BgInput}):Play()
-    end)
-
-    btn.MouseButton1Click:Connect(function()
-        callback()
-    end)
-end
-
 -- Helper: Slider
-local function createSlider(parent, title, minVal, maxVal, defaultVal, callback)
-    local card = Instance.new("Frame")
-    card.Size = UDim2.new(1, 0, 0, 52)
-    card.BackgroundColor3 = Theme.BgCard
-    card.BorderSizePixel = 0
-    card.Parent = parent
+local function AddSlider(parent, title, minVal, maxVal, defaultVal, callback)
+    local val = defaultVal or minVal
+    local row = Instance.new("Frame", parent)
+    row.Size = UDim2.new(1, 0, 0, 42)
+    row.BackgroundColor3 = Theme.ItemBg
+    row.BorderSizePixel = 0
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
+    Instance.new("UIStroke", row).Color = Theme.Border
 
-    local cardCorner = Instance.new("UICorner")
-    cardCorner.CornerRadius = UDim.new(0, 8)
-    cardCorner.Parent = card
+    local lbl = Instance.new("TextLabel", row)
+    lbl.Size = UDim2.new(1, -45, 0, 18)
+    lbl.Position = UDim2.new(0, 8, 0, 3)
+    lbl.BackgroundTransparency = 1
+    lbl.Font = Theme.FontB
+    lbl.Text = title
+    lbl.TextColor3 = Theme.White
+    lbl.TextSize = 10
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
 
-    local cardStroke = Instance.new("UIStroke")
-    cardStroke.Color = Theme.Border
-    cardStroke.Thickness = 1
-    cardStroke.Parent = card
+    local vL = Instance.new("TextLabel", row)
+    vL.Size = UDim2.new(0, 40, 0, 18)
+    vL.Position = UDim2.new(1, -45, 0, 3)
+    vL.BackgroundTransparency = 1
+    vL.Font = Theme.FontB
+    vL.Text = tostring(val)
+    vL.TextColor3 = Theme.White
+    vL.TextSize = 10
+    vL.TextXAlignment = Enum.TextXAlignment.Right
 
-    local tLabel = Instance.new("TextLabel")
-    tLabel.Size = UDim2.new(1, -60, 0, 20)
-    tLabel.Position = UDim2.new(0, 10, 0, 4)
-    tLabel.BackgroundTransparency = 1
-    tLabel.Font = Enum.Font.GothamBold
-    tLabel.Text = title
-    tLabel.TextColor3 = Theme.White
-    tLabel.TextSize = 12
-    tLabel.TextXAlignment = Enum.TextXAlignment.Left
-    tLabel.Parent = card
+    local bar = Instance.new("TextButton", row)
+    bar.Size = UDim2.new(1, -16, 0, 6)
+    bar.Position = UDim2.new(0, 8, 0, 26)
+    bar.BackgroundColor3 = Theme.Border
+    bar.Text = ""
+    bar.AutoButtonColor = false
+    Instance.new("UICorner", bar).CornerRadius = UDim.new(1, 0)
 
-    local vLabel = Instance.new("TextLabel")
-    vLabel.Size = UDim2.new(0, 45, 0, 20)
-    vLabel.Position = UDim2.new(1, -55, 0, 4)
-    vLabel.BackgroundTransparency = 1
-    vLabel.Font = Enum.Font.GothamBold
-    vLabel.Text = tostring(defaultVal)
-    vLabel.TextColor3 = Theme.White
-    vLabel.TextSize = 12
-    vLabel.TextXAlignment = Enum.TextXAlignment.Right
-    vLabel.Parent = card
-
-    local bar = Instance.new("Frame")
-    bar.Size = UDim2.new(1, -20, 0, 6)
-    bar.Position = UDim2.new(0, 10, 0, 34)
-    bar.BackgroundColor3 = Theme.BgInput
-    bar.BorderSizePixel = 0
-    bar.Parent = card
-
-    local barCorner = Instance.new("UICorner")
-    barCorner.CornerRadius = UDim.new(1, 0)
-    barCorner.Parent = bar
-
-    local fill = Instance.new("Frame")
-    fill.Size = UDim2.new(math.clamp((defaultVal - minVal) / (maxVal - minVal), 0, 1), 0, 1, 0)
+    local fill = Instance.new("Frame", bar)
+    fill.Size = UDim2.new(math.clamp((val - minVal) / (maxVal - minVal), 0, 1), 0, 1, 0)
     fill.BackgroundColor3 = Theme.White
     fill.BorderSizePixel = 0
-    fill.Parent = bar
+    Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
 
-    local fillCorner = Instance.new("UICorner")
-    fillCorner.CornerRadius = UDim.new(1, 0)
-    fillCorner.Parent = fill
-
-    local sliding = false
-
-    local function updateSlider(input)
-        local posX = math.clamp((input.Position.X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
-        local val = math.round(minVal + (maxVal - minVal) * posX)
-        fill.Size = UDim2.new(posX, 0, 1, 0)
-        vLabel.Text = tostring(val)
-        callback(val)
+    local drag = false
+    local function upd(i)
+        local rx = math.clamp(i.Position.X - bar.AbsolutePosition.X, 0, bar.AbsoluteSize.X)
+        local r = rx / bar.AbsoluteSize.X
+        val = math.floor(minVal + (maxVal - minVal) * r)
+        fill.Size = UDim2.new(r, 0, 1, 0)
+        vL.Text = tostring(val)
+        pcall(callback, val)
     end
 
-    bar.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            sliding = true
-            updateSlider(input)
+    bar.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            drag = true; upd(i)
         end
     end)
-
-    UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            sliding = false
+    UserInputService.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            drag = false
         end
     end)
-
-    UserInputService.InputChanged:Connect(function(input)
-        if sliding and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            updateSlider(input)
+    UserInputService.InputChanged:Connect(function(i)
+        if drag and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+            upd(i)
         end
     end)
 end
 
 -- ========================================================================
--- POPULATE PAGES WITH FUNCTIONALITY
+-- POPULATE CATEGORIES (STRICT ZERO EXECUTE BUTTONS - ALL TOGGLES)
 -- ========================================================================
 
--- 1. COASTERS TAB
-createSection(CoasterTab, "Automatic Coaster Circuits")
-
-createButton(CoasterTab, "Build Closed Coaster Circuit", "Builds a full loop with powered boost rails", function()
-    buildCoasterCircuit(8, 8)
-end)
-
-createButton(CoasterTab, "Build Large Oval Circuit", "Extended 16x10 circuit with continuous speed", function()
-    buildCoasterCircuit(16, 10)
-end)
-
-createButton(CoasterTab, "Build Sky Spiral Tower", "8-point spiraling coaster with chainlift climb", function()
-    buildSpiralCoaster(10, 5)
-end)
-
-createButton(CoasterTab, "Build High-Speed Runway", "Straight track boosted with active launch rails", function()
-    buildRunway(30)
-end)
-
-createSection(CoasterTab, "Continuous Live Path")
-
-createToggle(CoasterTab, "Auto Rail Walk/Fly Follower", "Lays rails directly in front as you move", State.AutoRailPath, function(v)
+-- TAB 1: TRACKS
+AddSection(PageTracks, "Continuous Rail Builders")
+AddToggle(PageTracks, "Auto Rail Walk/Fly Follower", "Lays rails directly in front as you move", State.AutoRailPath, function(v)
     State.AutoRailPath = v
 end)
 
-createSlider(CoasterTab, "Block Placement Delay (ms)", 10, 200, 50, function(v)
+AddToggle(PageTracks, "Auto Build Coaster Loop", "Constructs a full closed loop circuit", State.BuildCircuit, function(v)
+    State.BuildCircuit = v
+end)
+
+AddToggle(PageTracks, "Auto Build Large Oval Track", "Extended high-speed oval circuit", State.BuildOval, function(v)
+    State.BuildOval = v
+end)
+
+AddToggle(PageTracks, "Auto Build Sky Spiral Tower", "8-point spiraling coaster with chainlift", State.BuildSpiral, function(v)
+    State.BuildSpiral = v
+end)
+
+AddToggle(PageTracks, "Auto Build Speed Runway", "Straight boosted launch track", State.BuildRunway, function(v)
+    State.BuildRunway = v
+end)
+
+AddSection(PageTracks, "Build Settings")
+AddSlider(PageTracks, "Block Placement Speed (ms)", 10, 150, 50, function(v)
     State.BuildSpeed = v / 1000
 end)
 
--- 2. STRUCTURES TAB
-createSection(StructureTab, "Voxel Foundations & Towers")
-
-createButton(StructureTab, "Build Flat Platform (10x10)", "Generates a clean voxel floor under your feet", function()
-    buildPlatform(10)
+-- TAB 2: BUILDS (STRUCTURES & FOUNDATIONS)
+AddSection(PageStructures, "Voxel Platforms and Towers")
+AddToggle(PageStructures, "Auto Build Platform (10x10)", "Generates a clean voxel floor under feet", State.BuildPlatform, function(v)
+    State.BuildPlatform = v
 end)
 
-createButton(StructureTab, "Build Mega Platform (20x20)", "Spacious building base for large coasters", function()
-    buildPlatform(20)
+AddToggle(PageStructures, "Auto Build Platform (20x20)", "Large foundation for big coaster designs", State.BuildMegaPlatform, function(v)
+    State.BuildMegaPlatform = v
 end)
 
-createButton(StructureTab, "Build Giant Platform (30x30)", "Massive foundation covering 900 voxel blocks", function()
-    buildPlatform(30)
+AddToggle(PageStructures, "Auto Build Sky Pillar", "Pillar straight up to the build height", State.BuildSkyPillar, function(v)
+    State.BuildSkyPillar = v
 end)
 
-createButton(StructureTab, "Build Sky Pillar (Height 25)", "Pillar reaching up into the high build limit", function()
-    buildPillar(25)
+AddToggle(PageStructures, "Clear All Placed Blocks", "Demolishes all user-placed blocks on plot", State.AutoClearBlocks, function(v)
+    State.AutoClearBlocks = v
 end)
 
-createButton(StructureTab, "Clear / Demolish All Blocks", "Fires server demolition on placed blocks", function()
-    if ClearAllRemote then
-        pcall(function() ClearAllRemote:FireServer() end)
-        State.Status = "Cleared Blocks"
-    end
-end)
+-- TAB 3: LOOPS (STUNT TRACK PRESETS)
+AddSection(PageStunts, "Instant Stunt Tracks")
+AddToggle(PageStunts, "Place Loop Rail", "Vertical loop at front cell", State.LoopRail, function(v) State.LoopRail = v end)
+AddToggle(PageStunts, "Place Monster Loop", "Gigantic 16-stud radius stunt loop", State.MonsterLoop, function(v) State.MonsterLoop = v end)
+AddToggle(PageStunts, "Place Mega Drop", "Steep high vertical drop track", State.MegaDrop, function(v) State.MegaDrop = v end)
+AddToggle(PageStunts, "Place Corkscrew", "360-degree corkscrew roll element", State.Corkscrew, function(v) State.Corkscrew = v end)
+AddToggle(PageStunts, "Place Giant Drop", "Huge thrill tower drop track", State.GiantDrop, function(v) State.GiantDrop = v end)
+AddToggle(PageStunts, "Place Cobra Roll", "Double inversion cobra roll stunt", State.CobraRoll, function(v) State.CobraRoll = v end)
+AddToggle(PageStunts, "Place Zero-G Roll", "Weightless zero gravity roll", State.ZeroGRoll, function(v) State.ZeroGRoll = v end)
+AddToggle(PageStunts, "Place Airtime Hills", "Triple airtime camelback hills", State.AirtimeHills, function(v) State.AirtimeHills = v end)
+AddToggle(PageStunts, "Place Double Loop", "Twin continuous vertical loops", State.DoubleLoop, function(v) State.DoubleLoop = v end)
 
--- 3. PRESETS & LOOPS TAB
-createSection(PresetsTab, "Instant Loop & Track Stunts")
+-- TAB 4: PLAYER, CART & AUTOMATION
+AddSection(PagePlayer, "Minecart Automation")
+AddToggle(PagePlayer, "Auto Spawn Minecart", "Places new cart on the nearest rail", State.AutoSpawnCart, function(v) State.AutoSpawnCart = v end)
+AddToggle(PagePlayer, "Auto Mount / Ride Cart", "Continuously sits in nearest cart seat", State.AutoRideCart, function(v) State.AutoRideCart = v end)
+AddToggle(PagePlayer, "Cart Velocity Booster", "Enforces maximum speed and forward torque", State.BoostCartSpeed, function(v) State.BoostCartSpeed = v end)
+AddSlider(PagePlayer, "Cart Speed Multiplier", 1, 5, 2, function(v) State.CartSpeedMultiplier = v end)
 
-local presetList = {
-    {name = "Loop Rail", kind = "loop", r = 6},
-    {name = "Monster Loop", kind = "loop", r = 16},
-    {name = "Mega Drop", kind = "megadrop", r = 6},
-    {name = "Corkscrew", kind = "corkscrew", r = 6},
-    {name = "Giant Drop", kind = "giantdrop", r = 6},
-    {name = "Cobra Roll", kind = "cobra", r = 6},
-    {name = "Zero-G Roll", kind = "zerog", r = 6},
-    {name = "Airtime Hills", kind = "airtime", r = 6},
-    {name = "Double Loop", kind = "doubleloop", r = 6}
-}
+AddSection(PagePlayer, "Automated Rewards")
+AddToggle(PagePlayer, "Auto Claim Daily Login", "Redeems daily rewards every 15s", State.AutoClaimDaily, function(v) State.AutoClaimDaily = v end)
+AddToggle(PagePlayer, "Auto Claim Playtime Cash", "Collects free gift box money automatically", State.AutoClaimRewards, function(v) State.AutoClaimRewards = v end)
 
-for _, p in ipairs(presetList) do
-    createButton(PresetsTab, p.name, "Places stunt at current cell position", function()
-        local root = getRootPart()
-        if root and PlaceLoopRemote then
-            local cell = worldToCell(root.Position + root.CFrame.LookVector * 12)
-            pcall(function()
-                PlaceLoopRemote:FireServer(cell, p.kind, 0, p.r, Vector3.new(0, 0, 1))
-            end)
-            State.Status = "Placed " .. p.name
-        end
-    end)
-end
+AddSection(PagePlayer, "Movement & Hacks")
+AddToggle(PagePlayer, "Speed Hack", "Overrides humanoid walk speed", State.SpeedHack, function(v) State.SpeedHack = v end)
+AddSlider(PagePlayer, "WalkSpeed", 16, 200, 32, function(v) State.WalkSpeed = v end)
 
--- 4. MINECART TAB
-createSection(CartTab, "Minecart Automation")
-
-createButton(CartTab, "Spawn Minecart", "Places a new cart on the nearest track", function()
-    spawnCartOnNearestRail()
-end)
-
-createButton(CartTab, "Auto Mount / Sit in Cart", "Teleports avatar directly into closest cart seat", function()
-    autoMountNearestCart()
-end)
-
-createToggle(CartTab, "Cart Velocity Booster", "Enforces maximum torque and forward velocity", State.BoostCartSpeed, function(v)
-    State.BoostCartSpeed = v
-end)
-
-createSlider(CartTab, "Cart Speed Multiplier", 1, 5, 2, function(v)
-    State.CartSpeedMultiplier = v
-end)
-
-createButton(CartTab, "Remove / Despawn Carts", "Clears cart instances from the workspace", function()
-    if RemoveCartRemote then
-        pcall(function() RemoveCartRemote:FireServer() end)
-        State.Status = "Removed Carts"
-    end
-end)
-
--- 5. REWARDS TAB
-createSection(EconomyTab, "Automated Rewards")
-
-createToggle(EconomyTab, "Auto Claim Playtime Rewards", "Periodically redeems free gifts & cash", State.AutoClaimRewards, function(v)
-    State.AutoClaimRewards = v
-end)
-
-createToggle(EconomyTab, "Auto Claim Daily Reward", "Collects daily login rewards every 15s", State.AutoClaimDaily, function(v)
-    State.AutoClaimDaily = v
-end)
-
-createButton(EconomyTab, "Claim All Now", "Triggers immediate claim cycle for all rewards", function()
-    if RewardRemotes and RewardRemotes:FindFirstChild("ClaimReward") then
-        for i = 1, 12 do
-            pcall(function() RewardRemotes.ClaimReward:FireServer(i) end)
-        end
-    end
-    if DailyRemotes and DailyRemotes:FindFirstChild("ClaimDaily") then
-        pcall(function() DailyRemotes.ClaimDaily:FireServer() end)
-    end
-    State.Status = "Claimed All Rewards"
-end)
-
--- 6. PLAYER / MISC TAB
-createSection(PlayerTab, "Movement & Flight")
-
-createToggle(PlayerTab, "Speed Hack", "Overrides humanoid walk speed", State.SpeedHack, function(v)
-    State.SpeedHack = v
-    applyPlayerStats()
-end)
-
-createSlider(PlayerTab, "WalkSpeed", 16, 200, State.WalkSpeed, function(v)
-    State.WalkSpeed = v
-    applyPlayerStats()
-end)
-
-createToggle(PlayerTab, "Jump Power Hack", "Enables higher jumps", State.JumpHack, function(v)
-    State.JumpHack = v
-    applyPlayerStats()
-end)
-
-createSlider(PlayerTab, "JumpPower", 50, 300, State.JumpPower, function(v)
-    State.JumpPower = v
-    applyPlayerStats()
-end)
-
-createToggle(PlayerTab, "Infinite Jump", "Jump repeatedly mid-air", State.InfiniteJump, function(v)
-    State.InfiniteJump = v
-end)
-
-createToggle(PlayerTab, "Noclip", "Walk through all blocks and structures", State.Noclip, function(v)
-    State.Noclip = v
-end)
-
-createToggle(PlayerTab, "Smooth Fly", "Fly using WASD + Space/Shift keys", State.Fly, function(v)
-    State.Fly = v
-    toggleFly(v)
-end)
-
-createSlider(PlayerTab, "Fly Speed", 20, 200, State.FlySpeed, function(v)
-    State.FlySpeed = v
-end)
-
-createToggle(PlayerTab, "24/7 Anti-AFK", "Prevents 20-minute idle disconnects", State.AntiAFK, function(v)
-    State.AntiAFK = v
-end)
-
--- Status Bar
-local StatusBar = Instance.new("Frame")
-StatusBar.Name = "StatusBar"
-StatusBar.Size = UDim2.new(1, -140, 0, 24)
-StatusBar.Position = UDim2.new(0, 135, 1, -26)
-StatusBar.BackgroundColor3 = Theme.BgCard
-StatusBar.BorderSizePixel = 0
-StatusBar.Parent = MainCard
-
-local StatusCorner = Instance.new("UICorner")
-StatusCorner.CornerRadius = UDim.new(0, 6)
-StatusCorner.Parent = StatusBar
-
-local StatusStroke = Instance.new("UIStroke")
-StatusStroke.Color = Theme.Border
-StatusStroke.Thickness = 1
-StatusStroke.Parent = StatusBar
-
-local StatusText = Instance.new("TextLabel")
-StatusText.Size = UDim2.new(1, -10, 1, 0)
-StatusText.Position = UDim2.new(0, 8, 0, 0)
-StatusText.BackgroundTransparency = 1
-StatusText.Font = Enum.Font.GothamMedium
-StatusText.Text = "Status: Ready"
-StatusText.TextColor3 = Theme.White
-StatusText.TextSize = 11
-StatusText.TextXAlignment = Enum.TextXAlignment.Left
-StatusText.Parent = StatusBar
+AddToggle(PagePlayer, "Infinite Jump", "Jump repeatedly mid-air", State.InfiniteJump, function(v) State.InfiniteJump = v end)
+AddToggle(PagePlayer, "Noclip", "Walk through all blocks and structures", State.Noclip, function(v) State.Noclip = v end)
+AddToggle(PagePlayer, "Smooth Fly", "Fly using WASD + Space/Shift keys", State.Fly, function(v) State.Fly = v; toggleFly(v) end)
+AddSlider(PagePlayer, "Fly Speed", 20, 200, 50, function(v) State.FlySpeed = v end)
+AddToggle(PagePlayer, "24/7 Anti-AFK", "Prevents 20-minute idle disconnects", State.AntiAFK, function(v) State.AntiAFK = v end)
 
 -- Live Status updater
 task.spawn(function()
     while State.Running do
-        StatusText.Text = "Status: " .. tostring(State.Status)
-        task.wait(0.2)
+        FtrL.Text = "Status: " .. tostring(State.Status)
+        task.wait(0.25)
     end
 end)
 
