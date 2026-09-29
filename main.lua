@@ -5,7 +5,7 @@
     Game: Build Your Voxel Coaster
     Optimized for: Delta, Fluxus, Arceus X, Codex, Solara, Wave, PC
     Theme: Pure Midnight Black & Clean Crisp White (Monochrome Pro UI)
-    Layout: Portrait with Dynamic Scale and Corner Resize Grip
+    Layout: Portrait (280x400) with Scale Buttons and Corner Resize Grip
     Strict Rule: Zero Emojis, No Hub Branding, 100% Toggle-Driven Automation
     ========================================================================
 --]]
@@ -731,13 +731,13 @@ fS.Color = Theme.White; fS.Thickness = 1.2
 makeDraggable(FloatBtn)
 
 -- Main Portrait Panel
-local curW = 270
-local curH = 380
+local curW = 280
+local curH = 400
 
 local Main = Instance.new("Frame", ScreenGui)
 Main.Name = "MainPanel"
 Main.Size = UDim2.new(0, curW, 0, curH)
-Main.Position = UDim2.new(0.5, -135, 0.35, 0)
+Main.Position = UDim2.new(0.5, -140, 0.25, 0)
 Main.BackgroundColor3 = Theme.BG
 Main.BorderSizePixel = 0
 Main.Active = true
@@ -905,8 +905,8 @@ end)
 UserInputService.InputChanged:Connect(function(i)
     if resizing and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
         local delta = (i.Position - rStartPos) / (GlobalScale.Scale or 1)
-        curW = math.clamp(rStartSize.X + delta.X, 220, 480)
-        curH = math.clamp(rStartSize.Y + delta.Y, 260, 650)
+        curW = math.clamp(rStartSize.X + delta.X, 240, 500)
+        curH = math.clamp(rStartSize.Y + delta.Y, 280, 680)
         Main.Size = UDim2.new(0, curW, 0, curH)
     end
 end)
