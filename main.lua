@@ -64,7 +64,6 @@ end)
 
 -- Game Remotes & References
 local BuildRemotes = ReplicatedStorage:WaitForChild("BuildRemotes", 5)
-local BuildToolRemotes = ReplicatedStorage:FindFirstChild("BuildToolRemotes")
 local RewardRemotes = ReplicatedStorage:FindFirstChild("RewardRemotes")
 local DailyRemotes = ReplicatedStorage:FindFirstChild("DailyRemotes")
 
@@ -73,7 +72,6 @@ local BreakBlockRemote = BuildRemotes and BuildRemotes:FindFirstChild("BreakBloc
 local PlaceCartRemote = BuildRemotes and BuildRemotes:FindFirstChild("PlaceCart")
 local RemoveCartRemote = BuildRemotes and BuildRemotes:FindFirstChild("RemoveCart")
 local PlaceLoopRemote = BuildRemotes and BuildRemotes:FindFirstChild("PlaceLoop")
-local PlaceTemplateRemote = BuildRemotes and BuildRemotes:FindFirstChild("PlaceTemplate")
 local ClearAllRemote = BuildRemotes and BuildRemotes:FindFirstChild("ClearAll")
 
 -- ========================================================================
@@ -84,8 +82,8 @@ local State = {
     UiScale = 1.0,
     
     -- Main Coaster Farm Toggles
-    MasterCoasterFarm = false,     -- Builds Hill + 2 Loops, Spawns Cart, Auto Rides & Farms Infinite Cash
-    BuildStuntTrack = false,       -- Hill Ramp, Drop and 2 Loops
+    MasterCoasterFarm = false,     -- Full Coaster Build + Cart Spawn + Infinite Ride & Farm
+    BuildStuntTrack = false,       -- Hill + Drop + Full Closed Circuit
     AutoRideCart = false,          -- Sits in cart and drives continuously
     BoostCartSpeed = true,         -- High speed booster on cart
     CartSpeedMultiplier = 3,
@@ -120,7 +118,7 @@ local State = {
     AntiAFK = true,
     
     -- Configuration
-    BuildSpeed = 0.04,
+    BuildSpeed = 0.035,
     SelectedBlockType = "Oak Wood Plank",
     SelectedRailType = "Rail",
     Status = "Ready"
@@ -166,49 +164,49 @@ end
 -- Convert World Position to 4x4 Grid Cell
 local function worldToCell(pos)
     return Vector3.new(
-        math.floor((pos.X) / 4),
-        math.floor((pos.Y) / 4),
-        math.floor((pos.Z) / 4)
+        math.floor(pos.X / 4),
+        math.max(0, math.floor(pos.Y / 4)),
+        math.floor(pos.Z / 4)
     )
 end
 
--- Proper Tool Equipper with Humanoid Support
-local function equipTool(toolName)
+-- Safe Tool Equipper with Verification & Unequip Handling
+local function equipToolSafely(toolName)
     local char = getCharacter()
-    if not char then return nil end
     local hum = getHumanoid()
+    if not char or not hum then return false end
     
-    local tool = char:FindFirstChild(toolName)
-    if tool and tool:IsA("Tool") then return tool end
-    
-    local inBackpack = LocalPlayer.Backpack:FindFirstChild(toolName)
-    if inBackpack then
-        if hum then
-            hum:EquipTool(inBackpack)
-        else
-            inBackpack.Parent = char
-        end
-        return inBackpack
+    local current = char:FindFirstChild(toolName)
+    if current and current:IsA("Tool") then
+        return true
     end
     
-    return char:FindFirstChildOfClass("Tool")
+    hum:UnequipTools()
+    task.wait(0.08)
+    
+    local tool = LocalPlayer.Backpack:FindFirstChild(toolName)
+    if not tool then
+        tool = char:FindFirstChild(toolName)
+    end
+    
+    if tool then
+        hum:EquipTool(tool)
+        local t0 = tick()
+        while not char:FindFirstChild(toolName) and tick() - t0 < 0.8 do
+            task.wait(0.04)
+        end
+        return char:FindFirstChild(toolName) ~= nil
+    end
+    return false
 end
 
--- Universal Block Placement Dispatcher
-local function placeVoxelBlock(cell, blockName, rot)
+-- Clean Single-Dispatch Block Placement (NO tool:Activate() to prevent random mouse clicks)
+local function placeVoxelBlock(cell, rot)
     rot = rot or 0
     if not PlaceBlockRemote then return false end
-    
-    local tool = equipTool(blockName)
-    
-    pcall(function() PlaceBlockRemote:FireServer(cell, rot) end)
-    pcall(function() PlaceBlockRemote:FireServer(cell, blockName, rot) end)
-    pcall(function() PlaceBlockRemote:FireServer(cell, rot, blockName) end)
-    pcall(function() PlaceBlockRemote:FireServer(cell, rot, Vector3.new(0, 0, 1)) end)
-    
-    if tool and tool:FindFirstChild("Handle") then
-        pcall(function() tool:Activate() end)
-    end
+    pcall(function()
+        PlaceBlockRemote:FireServer(cell, rot)
+    end)
     return true
 end
 
@@ -218,26 +216,27 @@ local function placeStunt(cell, kind, r, dir)
     r = r or 6
     dir = dir or Vector3.new(0, 0, 1)
     pcall(function() PlaceLoopRemote:FireServer(cell, kind, 0, r, dir) end)
-    pcall(function()
-        if PlaceTemplateRemote then
-            PlaceTemplateRemote:FireServer(kind, cell, 0)
-        end
-    end)
     return true
 end
 
 -- Spawn & Mount Cart
 local function spawnCart(cell)
     if not PlaceCartRemote then return end
-    equipTool("Minecart")
-    pcall(function() PlaceCartRemote:FireServer(cell) end)
+    equipToolSafely("Minecart")
+    task.wait(0.1)
+    pcall(function()
+        PlaceCartRemote:FireServer(cell)
+    end)
 end
 
 local function mountNearestCart()
     local root = getRootPart()
     if not root then return end
+    local hum = getHumanoid()
+    if hum and hum.SeatPart then return end
+    
     local nearest = nil
-    local minDist = 60
+    local minDist = 80
     local cartsFolder = Workspace:FindFirstChild("Minecarts") or Workspace
     for _, item in ipairs(cartsFolder:GetDescendants()) do
         if item:IsA("VehicleSeat") or (item:IsA("Seat") and item.Name:lower():find("cart")) then
@@ -248,120 +247,210 @@ local function mountNearestCart()
             end
         end
     end
-    if nearest then
-        local hum = getHumanoid()
-        if hum then nearest:Sit(hum) end
+    if nearest and hum then
+        nearest:Sit(hum)
     end
 end
 
 -- ========================================================================
--- EXACT STUNT COASTER ENGINE (HILL RAMP + DROP + 2 LOOPS + RETURN CIRCUIT)
+-- FLAWLESS COMPLETE CLOSED-CIRCUIT COASTER GENERATOR
 -- ========================================================================
-local function buildStuntHillAndLoops()
+local function buildCompleteCircuitCoaster()
     local root = getRootPart()
     if not root then return nil end
     
+    -- Freeze character in place to prevent falling off during build
+    local origAnchored = root.Anchored
+    root.Anchored = true
+    
     local startCell = worldToCell(root.Position)
-    local curY = math.max(1, startCell.Y)
-    local lookDir = root.CFrame.LookVector
-    local dirX = math.abs(lookDir.X) > math.abs(lookDir.Z) and (lookDir.X > 0 and 1 or -1) or 0
-    local dirZ = dirX == 0 and (lookDir.Z > 0 and 1 or -1) or 0
+    local curY = math.max(0, startCell.Y)
+    local ox = startCell.X
+    local oz = startCell.Z + 2
     
-    State.Status = "Laying Launch Runway..."
-    -- 1. Start Launch Platform & Powered Rails
-    for i = 1, 4 do
-        local c = Vector3.new(startCell.X + (dirX * i), curY, startCell.Z + (dirZ * i))
-        placeVoxelBlock(Vector3.new(c.X, c.Y - 1, c.Z), "Oak Wood Plank", 0)
-        placeVoxelBlock(c, "Powered Rail - Active", 0)
-        task.wait(State.BuildSpeed)
+    -- Data Buckets for Sequential Batch Building (Zero Tool Thrashing)
+    local plankBatch = {}
+    local chainliftBatch = {}
+    local poweredRailBatch = {}
+    local standardRailBatch = {}
+    
+    local function addPlank(cx, cy, cz)
+        table.insert(plankBatch, {cell = Vector3.new(cx, cy, cz), rot = 0})
+    end
+    local function addChainlift(cx, cy, cz, rot)
+        table.insert(chainliftBatch, {cell = Vector3.new(cx, cy, cz), rot = rot or 0})
+    end
+    local function addPowered(cx, cy, cz, rot)
+        table.insert(poweredRailBatch, {cell = Vector3.new(cx, cy, cz), rot = rot or 0})
+    end
+    local function addRail(cx, cy, cz, rot)
+        table.insert(standardRailBatch, {cell = Vector3.new(cx, cy, cz), rot = rot or 0})
     end
     
-    State.Status = "Building Hill Incline (Chainlift)..."
-    -- 2. Ascending Hill Ramp with Chainlift Rails (4 Blocks High)
-    local hillStart = 4
-    for h = 1, 4 do
-        local c = Vector3.new(startCell.X + (dirX * (hillStart + h)), curY + h, startCell.Z + (dirZ * (hillStart + h)))
-        for sy = 0, h do
-            placeVoxelBlock(Vector3.new(c.X, curY - 1 + sy, c.Z), "Oak Wood Plank", 0)
+    -- SECTION 1: Station & Launch Pad (8 blocks along Z at X = ox)
+    for z = 0, 7 do
+        addPlank(ox, curY, oz + z)
+        addPowered(ox, curY + 1, oz + z, 0)
+    end
+    
+    -- SECTION 2: Ascending Incline Hill (6 steps along Z at X = ox)
+    local hillStart = 8
+    for step = 1, 6 do
+        local z = oz + hillStart + (step - 1)
+        local h = curY + step
+        for sy = 0, step do
+            addPlank(ox, curY + sy, z)
         end
-        placeVoxelBlock(c, "Chainlift Rail", 0)
-        task.wait(State.BuildSpeed)
+        addChainlift(ox, h + 1, z, 3)
     end
     
-    State.Status = "Building Steep Drop..."
-    -- 3. Hill Peak & Drop Back Down
-    local dropStart = hillStart + 4
-    for h = 1, 4 do
-        local c = Vector3.new(startCell.X + (dirX * (dropStart + h)), curY + (4 - h), startCell.Z + (dirZ * (dropStart + h)))
-        for sy = 0, (4 - h) do
-            placeVoxelBlock(Vector3.new(c.X, curY - 1 + sy, c.Z), "Oak Wood Plank", 0)
-        end
-        placeVoxelBlock(c, "Powered Rail - Active", 0)
-        task.wait(State.BuildSpeed)
-    end
-    
-    State.Status = "Placing Stunt Loops..."
-    -- 4. Transition Flat Track
-    local loopStart = dropStart + 5
+    -- SECTION 3: Peak Crest (3 flat blocks at top)
+    local peakStart = hillStart + 6
+    local peakY = curY + 6
     for i = 0, 2 do
-        local c = Vector3.new(startCell.X + (dirX * (loopStart + i)), curY, startCell.Z + (dirZ * (loopStart + i)))
-        placeVoxelBlock(Vector3.new(c.X, c.Y - 1, c.Z), "Stone Bricks", 0)
-        placeVoxelBlock(c, "Powered Rail - Active", 0)
-        task.wait(State.BuildSpeed)
+        local z = oz + peakStart + i
+        for sy = 0, 6 do
+            addPlank(ox, curY + sy, z)
+        end
+        addPowered(ox, peakY + 1, z, 0)
     end
     
-    -- 5. Stunt Element 1: Vertical Loop
-    local loop1Cell = Vector3.new(startCell.X + (dirX * (loopStart + 3)), curY, startCell.Z + (dirZ * (loopStart + 3)))
-    placeStunt(loop1Cell, "loop", 6, Vector3.new(dirX, 0, dirZ))
-    task.wait(0.25)
+    -- SECTION 4: Steep Thrill Drop (6 descending steps)
+    local dropStart = peakStart + 3
+    for step = 1, 6 do
+        local z = oz + dropStart + (step - 1)
+        local h = peakY - step
+        for sy = 0, (6 - step) do
+            addPlank(ox, curY + sy, z)
+        end
+        addPowered(ox, h + 1, z, 1)
+    end
     
-    -- 6. Stunt Element 2: Second Vertical Loop
-    local loop2Cell = Vector3.new(startCell.X + (dirX * (loopStart + 7)), curY, startCell.Z + (dirZ * (loopStart + 7)))
-    placeStunt(loop2Cell, "loop", 6, Vector3.new(dirX, 0, dirZ))
-    task.wait(0.25)
+    -- SECTION 5: High-Speed Straight Runway (7 blocks)
+    local speedStart = dropStart + 6
+    for i = 0, 6 do
+        local z = oz + speedStart + i
+        addPlank(ox, curY, z)
+        addPowered(ox, curY + 1, z, 0)
+    end
     
-    State.Status = "Connecting Return Circuit..."
-    -- 7. Return Loop back to start so cart runs indefinitely
-    local returnStart = loopStart + 11
+    -- SECTION 6: First 180-Degree Banked Turn (Connecting X = ox to X = ox + 8)
+    local turn1Z = oz + speedStart + 7
     local width = 8
-    local sideX = -dirZ
-    local sideZ = dirX
     
-    -- Curve Turn
-    for w = 0, width do
-        local c = Vector3.new(startCell.X + (dirX * returnStart) + (sideX * w), curY, startCell.Z + (dirZ * returnStart) + (sideZ * w))
-        placeVoxelBlock(Vector3.new(c.X, c.Y - 1, c.Z), "Oak Wood Plank", 0)
-        placeVoxelBlock(c, "Powered Rail - Active", 0)
-        task.wait(State.BuildSpeed)
+    -- Corner 1A: Lead into curve
+    addPlank(ox, curY, turn1Z)
+    addPowered(ox, curY + 1, turn1Z, 0)
+    
+    -- Curve 1: Turning towards +X
+    addPlank(ox, curY, turn1Z + 1)
+    addRail(ox, curY + 1, turn1Z + 1, 1)
+    
+    for w = 1, width - 1 do
+        addPlank(ox + w, curY, turn1Z + 1)
+        addPowered(ox + w, curY + 1, turn1Z + 1, 1)
     end
     
-    -- Return Straight Run
-    for i = returnStart, 1, -1 do
-        local c = Vector3.new(startCell.X + (dirX * i) + (sideX * width), curY, startCell.Z + (dirZ * i) + (sideZ * width))
-        placeVoxelBlock(Vector3.new(c.X, c.Y - 1, c.Z), "Oak Wood Plank", 0)
-        placeVoxelBlock(c, (i % 3 == 0) and "Powered Rail - Active" or "Rail", 0)
-        task.wait(State.BuildSpeed)
+    -- Curve 2: Turning down towards -Z into return lane
+    addPlank(ox + width, curY, turn1Z + 1)
+    addRail(ox + width, curY + 1, turn1Z + 1, 2)
+    
+    -- SECTION 7: Return Straight Lane (31 blocks heading back towards station)
+    for z = turn1Z, oz, -1 do
+        addPlank(ox + width, curY, z)
+        if (z % 2 == 0) then
+            addPowered(ox + width, curY + 1, z, 0)
+        else
+            addRail(ox + width, curY + 1, z, 0)
+        end
     end
     
-    -- Connect back to launch pad
-    for w = width, 0, -1 do
-        local c = Vector3.new(startCell.X + (sideX * w), curY, startCell.Z + (sideZ * w))
-        placeVoxelBlock(Vector3.new(c.X, c.Y - 1, c.Z), "Oak Wood Plank", 0)
-        placeVoxelBlock(c, "Powered Rail - Active", 0)
-        task.wait(State.BuildSpeed)
+    -- SECTION 8: Second 180-Degree Banked Turn (Connecting X = ox + width back to X = ox)
+    local turn2Z = oz - 1
+    
+    -- Curve 3: Turning towards -X
+    addPlank(ox + width, curY, turn2Z)
+    addRail(ox + width, curY + 1, turn2Z, 3)
+    
+    for w = width - 1, 1, -1 do
+        addPlank(ox + w, curY, turn2Z)
+        addPowered(ox + w, curY + 1, turn2Z, 1)
     end
     
-    return Vector3.new(startCell.X + (dirX * 2), curY, startCell.Z + (dirZ * 2))
+    -- Curve 4: Turning into Station launch pad at (ox, curY + 1, oz)
+    addPlank(ox, curY, turn2Z)
+    addRail(ox, curY + 1, turn2Z, 0)
+    
+    -- ====================================================================
+    -- EXECUTION PHASES (ORDERED BY TOOL - ZERO CONFLICTS)
+    -- ====================================================================
+    
+    -- PHASE 1: Build All Foundations (Oak Wood Planks)
+    State.Status = "Building Foundations (" .. #plankBatch .. " Planks)..."
+    if equipToolSafely("Oak Wood Plank") then
+        task.wait(0.15)
+        for idx, item in ipairs(plankBatch) do
+            if not State.Running then break end
+            placeVoxelBlock(item.cell, item.rot)
+            if idx % 8 == 0 then
+                State.Status = "Planks: " .. idx .. "/" .. #plankBatch
+            end
+            task.wait(State.BuildSpeed)
+        end
+    end
+    
+    -- PHASE 2: Lay Ascending Incline (Chainlift Rails)
+    State.Status = "Laying Hill Incline (" .. #chainliftBatch .. " Chainlifts)..."
+    if equipToolSafely("Chainlift Rail") then
+        task.wait(0.15)
+        for idx, item in ipairs(chainliftBatch) do
+            if not State.Running then break end
+            placeVoxelBlock(item.cell, item.rot)
+            task.wait(State.BuildSpeed)
+        end
+    end
+    
+    -- PHASE 3: Lay Speed Boosters (Powered Rails)
+    State.Status = "Laying Launch & Drop (" .. #poweredRailBatch .. " Powered Rails)..."
+    if equipToolSafely("Powered Rail - Active") then
+        task.wait(0.15)
+        for idx, item in ipairs(poweredRailBatch) do
+            if not State.Running then break end
+            placeVoxelBlock(item.cell, item.rot)
+            if idx % 8 == 0 then
+                State.Status = "Powered: " .. idx .. "/" .. #poweredRailBatch
+            end
+            task.wait(State.BuildSpeed)
+        end
+    end
+    
+    -- PHASE 4: Lay Circuit Connections & Turns (Standard Rails)
+    State.Status = "Laying Banked Curves & Turns (" .. #standardRailBatch .. " Rails)..."
+    if equipToolSafely("Rail") then
+        task.wait(0.15)
+        for idx, item in ipairs(standardRailBatch) do
+            if not State.Running then break end
+            placeVoxelBlock(item.cell, item.rot)
+            task.wait(State.BuildSpeed)
+        end
+    end
+    
+    -- Restore player root anchoring
+    root.Anchored = origAnchored
+    State.Status = "Coaster Circuit 100% Complete!"
+    
+    -- Return spawn cell for cart (Station Cell at z = oz + 2)
+    return Vector3.new(ox, curY + 1, oz + 2)
 end
 
 -- ========================================================================
--- MASTER COASTER FARM RUNNER (BUILD + RIDE + INFINITE CASH)
+-- MASTER COASTER FARM RUNNER (BUILD + SPAWN + RIDE + CASH FARM)
 -- ========================================================================
 task.spawn(function()
     while State.Running do
         if State.MasterCoasterFarm then
-            local cartSpawnCell = buildStuntHillAndLoops()
-            task.wait(0.5)
+            local cartSpawnCell = buildCompleteCircuitCoaster()
+            task.wait(0.6)
             
             State.Status = "Spawning Minecart..."
             if cartSpawnCell then
@@ -370,7 +459,7 @@ task.spawn(function()
                 local root = getRootPart()
                 if root then spawnCart(worldToCell(root.Position)) end
             end
-            task.wait(0.8)
+            task.wait(1.0)
             
             State.Status = "Mounting Cart..."
             mountNearestCart()
@@ -388,11 +477,11 @@ task.spawn(function()
     end
 end)
 
--- Dedicated Stunt Coaster Builder
+-- Dedicated Stunt Track Builder Toggle
 task.spawn(function()
     while State.Running do
         if State.BuildStuntTrack then
-            buildStuntHillAndLoops()
+            buildCompleteCircuitCoaster()
             State.Status = "Stunt Coaster Ready!"
             State.BuildStuntTrack = false
         end
@@ -409,7 +498,7 @@ task.spawn(function()
             if root then
                 local center = worldToCell(root.Position)
                 local rX, rZ = 12, 7
-                local y = math.max(1, center.Y + 1)
+                local y = math.max(0, center.Y)
                 
                 local cells = {}
                 for x = -rX, rX do
@@ -420,11 +509,24 @@ task.spawn(function()
                     table.insert(cells, {c = Vector3.new(center.X + rX, y, center.Z + z), rot = 1, p = (math.abs(z) % 3 == 0)})
                     table.insert(cells, {c = Vector3.new(center.X - rX, y, center.Z + z), rot = 3, p = (math.abs(z) % 3 == 0)})
                 end
-                for _, pt in ipairs(cells) do
-                    if not State.BuildCircuit then break end
-                    placeVoxelBlock(Vector3.new(pt.c.X, pt.c.Y - 1, pt.c.Z), "Oak Wood Plank", 0)
-                    placeVoxelBlock(pt.c, pt.p and "Powered Rail - Active" or "Rail", pt.rot)
-                    if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
+                
+                -- Foundations first
+                if equipToolSafely("Oak Wood Plank") then
+                    task.wait(0.15)
+                    for _, pt in ipairs(cells) do
+                        if not State.BuildCircuit then break end
+                        placeVoxelBlock(pt.c, 0)
+                        task.wait(State.BuildSpeed)
+                    end
+                end
+                -- Rails on top
+                if equipToolSafely("Powered Rail - Active") then
+                    task.wait(0.15)
+                    for _, pt in ipairs(cells) do
+                        if not State.BuildCircuit then break end
+                        placeVoxelBlock(Vector3.new(pt.c.X, pt.c.Y + 1, pt.c.Z), pt.rot)
+                        task.wait(State.BuildSpeed)
+                    end
                 end
             end
             State.BuildCircuit = false
@@ -438,15 +540,31 @@ task.spawn(function()
                 local center = worldToCell(root.Position)
                 local rad, levels = 5, 8
                 local angle = 0
+                
+                local spiralCells = {}
                 for i = 1, levels * 8 do
-                    if not State.BuildSpiral then break end
                     local cx = center.X + math.round(math.cos(angle) * rad)
                     local cz = center.Z + math.round(math.sin(angle) * rad)
-                    local curY = math.max(1, center.Y + math.floor(i / 2))
-                    placeVoxelBlock(Vector3.new(cx, curY - 1, cz), "Oak Wood Plank", 0)
-                    placeVoxelBlock(Vector3.new(cx, curY, cz), "Chainlift Rail", 0)
-                    if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
+                    local curY = math.max(0, center.Y + math.floor(i / 2))
+                    table.insert(spiralCells, {x = cx, y = curY, z = cz})
                     angle = angle + (math.pi / 4)
+                end
+                
+                if equipToolSafely("Oak Wood Plank") then
+                    task.wait(0.15)
+                    for _, pt in ipairs(spiralCells) do
+                        if not State.BuildSpiral then break end
+                        placeVoxelBlock(Vector3.new(pt.x, pt.y, pt.z), 0)
+                        task.wait(State.BuildSpeed)
+                    end
+                end
+                if equipToolSafely("Chainlift Rail") then
+                    task.wait(0.15)
+                    for _, pt in ipairs(spiralCells) do
+                        if not State.BuildSpiral then break end
+                        placeVoxelBlock(Vector3.new(pt.x, pt.y + 1, pt.z), 0)
+                        task.wait(State.BuildSpeed)
+                    end
                 end
             end
             State.BuildSpiral = false
@@ -458,16 +576,23 @@ task.spawn(function()
             local root = getRootPart()
             if root then
                 local start = worldToCell(root.Position)
-                local look = root.CFrame.LookVector
-                local dx = math.abs(look.X) > math.abs(look.Z) and (look.X > 0 and 1 or -1) or 0
-                local dz = dx == 0 and (look.Z > 0 and 1 or -1) or 0
-                local curY = math.max(1, start.Y)
-                for i = 1, 25 do
-                    if not State.BuildRunway then break end
-                    local c = Vector3.new(start.X + (dx * i), curY, start.Z + (dz * i))
-                    placeVoxelBlock(Vector3.new(c.X, c.Y - 1, c.Z), "Stone Bricks", 0)
-                    placeVoxelBlock(c, (i % 2 == 0) and "Launch Rail" or "Powered Rail - Active", 0)
-                    if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
+                local curY = math.max(0, start.Y)
+                
+                if equipToolSafely("Oak Wood Plank") then
+                    task.wait(0.15)
+                    for i = 1, 25 do
+                        if not State.BuildRunway then break end
+                        placeVoxelBlock(Vector3.new(start.X, curY, start.Z + i), 0)
+                        task.wait(State.BuildSpeed)
+                    end
+                end
+                if equipToolSafely("Powered Rail - Active") then
+                    task.wait(0.15)
+                    for i = 1, 25 do
+                        if not State.BuildRunway then break end
+                        placeVoxelBlock(Vector3.new(start.X, curY + 1, start.Z + i), 0)
+                        task.wait(State.BuildSpeed)
+                    end
                 end
             end
             State.BuildRunway = false
@@ -478,64 +603,81 @@ task.spawn(function()
             local root = getRootPart()
             if root then
                 local cur = worldToCell(root.Position)
-                placeVoxelBlock(Vector3.new(cur.X, cur.Y - 1, cur.Z), State.SelectedBlockType, 0)
-                placeVoxelBlock(Vector3.new(cur.X, cur.Y, cur.Z), State.SelectedRailType, 0)
+                if equipToolSafely(State.SelectedBlockType) then
+                    placeVoxelBlock(Vector3.new(cur.X, cur.Y, cur.Z), 0)
+                end
+                task.wait(0.1)
+                if equipToolSafely(State.SelectedRailType) then
+                    placeVoxelBlock(Vector3.new(cur.X, cur.Y + 1, cur.Z), 0)
+                end
             end
-            task.wait(0.18)
+            task.wait(0.2)
         else
             task.wait(0.3)
         end
     end
 end)
 
--- Platforms and Pillars
+-- Platforms and Demolition
 task.spawn(function()
     while State.Running do
         if State.BuildPlatform then
             local root = getRootPart()
             if root then
                 local center = worldToCell(root.Position)
-                local y = math.max(0, center.Y - 1)
-                for x = -5, 5 do
-                    for z = -5, 5 do
-                        if not State.BuildPlatform then break end
-                        placeVoxelBlock(Vector3.new(center.X + x, y, center.Z + z), State.SelectedBlockType, 0)
-                        if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
+                local y = math.max(0, center.Y)
+                if equipToolSafely(State.SelectedBlockType) then
+                    task.wait(0.15)
+                    for x = -5, 5 do
+                        for z = -5, 5 do
+                            if not State.BuildPlatform then break end
+                            placeVoxelBlock(Vector3.new(center.X + x, y, center.Z + z), 0)
+                            if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
+                        end
                     end
                 end
             end
             State.BuildPlatform = false
             State.Status = "Platform (10x10) Built!"
         end
+        
         if State.BuildMegaPlatform then
             local root = getRootPart()
             if root then
                 local center = worldToCell(root.Position)
-                local y = math.max(0, center.Y - 1)
-                for x = -10, 10 do
-                    for z = -10, 10 do
-                        if not State.BuildMegaPlatform then break end
-                        placeVoxelBlock(Vector3.new(center.X + x, y, center.Z + z), State.SelectedBlockType, 0)
-                        if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
+                local y = math.max(0, center.Y)
+                if equipToolSafely(State.SelectedBlockType) then
+                    task.wait(0.15)
+                    for x = -10, 10 do
+                        for z = -10, 10 do
+                            if not State.BuildMegaPlatform then break end
+                            placeVoxelBlock(Vector3.new(center.X + x, y, center.Z + z), 0)
+                            if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
+                        end
                     end
                 end
             end
             State.BuildMegaPlatform = false
             State.Status = "Platform (20x20) Built!"
         end
+        
         if State.BuildSkyPillar then
             local root = getRootPart()
             if root then
                 local center = worldToCell(root.Position)
-                for y = 0, 25 do
-                    if not State.BuildSkyPillar then break end
-                    placeVoxelBlock(Vector3.new(center.X, center.Y + y, center.Z), State.SelectedBlockType, 0)
-                    if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
+                if equipToolSafely(State.SelectedBlockType) then
+                    task.wait(0.15)
+                    for y = 0, 25 do
+                        if not State.BuildSkyPillar then break end
+                        placeVoxelBlock(Vector3.new(center.X, center.Y + y, center.Z), 0)
+                        if State.BuildSpeed > 0 then task.wait(State.BuildSpeed) end
+                    end
                 end
             end
             State.BuildSkyPillar = false
             State.Status = "Sky Pillar Built!"
         end
+        
         if State.AutoClearBlocks then
             if ClearAllRemote then
                 pcall(function() ClearAllRemote:FireServer() end)
@@ -556,13 +698,18 @@ task.spawn(function()
             if State.LoopRail then placeStunt(frontCell, "loop", 6); State.LoopRail = false end
             if State.MonsterLoop then placeStunt(frontCell, "loop", 16); State.MonsterLoop = false end
             if State.MegaDrop then placeStunt(frontCell, "megadrop", 6); State.MegaDrop = false end
-            if State.DoubleLoop then placeStunt(frontCell, "loop", 6); task.wait(0.2); placeStunt(worldToCell(root.Position + root.CFrame.LookVector * 16), "loop", 6); State.DoubleLoop = false end
+            if State.DoubleLoop then
+                placeStunt(frontCell, "loop", 6)
+                task.wait(0.25)
+                placeStunt(worldToCell(root.Position + root.CFrame.LookVector * 16), "loop", 6)
+                State.DoubleLoop = false
+            end
         end
         task.wait(0.3)
     end
 end)
 
--- Minecart & Cash Booster
+-- Minecart Velocity Booster & Automated Rewards
 task.spawn(function()
     while State.Running do
         if State.AutoRideCart then
@@ -1062,16 +1209,16 @@ end
 
 -- TAB 1: TRACKS (FEATURED COASTERS & STUNT CIRCUITS)
 AddSection(PageTracks, "Master Automation")
-AddToggle(PageTracks, "Auto Farm Coaster (All-in-One)", "Builds Hill+Loops, rides cart & farms cash", State.MasterCoasterFarm, function(v)
+AddToggle(PageTracks, "Auto Farm Coaster (All-in-One)", "Builds complete circuit, spawns cart & farms cash", State.MasterCoasterFarm, function(v)
     State.MasterCoasterFarm = v
 end)
 
-AddSection(PageTracks, "Stunt Coasters")
-AddToggle(PageTracks, "Build Stunt Track (Hill + 2 Loops)", "Constructs exact hill ramp & double loop", State.BuildStuntTrack, function(v)
+AddSection(PageTracks, "Coaster Construction")
+AddToggle(PageTracks, "Build Closed Coaster Circuit", "Hill ramp, drop, high-speed run & return", State.BuildStuntTrack, function(v)
     State.BuildStuntTrack = v
 end)
 
-AddToggle(PageTracks, "Build Closed Coaster Loop", "Constructs a full high-speed loop circuit", State.BuildCircuit, function(v)
+AddToggle(PageTracks, "Build Oval Speed Circuit", "Continuous high-speed loop circuit", State.BuildCircuit, function(v)
     State.BuildCircuit = v
 end)
 
@@ -1107,7 +1254,7 @@ end)
 
 -- TAB 3: LOOPS (STUNT TRACK PRESETS)
 AddSection(PageStunts, "Instant Stunt Elements")
-AddToggle(PageStunts, "Place Double Loop", "Twin continuous vertical loops (as in pic)", State.DoubleLoop, function(v) State.DoubleLoop = v end)
+AddToggle(PageStunts, "Place Double Loop", "Twin continuous vertical loops", State.DoubleLoop, function(v) State.DoubleLoop = v end)
 AddToggle(PageStunts, "Place Loop Rail", "Vertical loop at front cell", State.LoopRail, function(v) State.LoopRail = v end)
 AddToggle(PageStunts, "Place Monster Loop", "Gigantic 16-stud radius stunt loop", State.MonsterLoop, function(v) State.MonsterLoop = v end)
 AddToggle(PageStunts, "Place Mega Drop", "Steep high vertical drop track", State.MegaDrop, function(v) State.MegaDrop = v end)
